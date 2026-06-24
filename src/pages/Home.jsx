@@ -186,7 +186,7 @@ const Home = () => {
           }
           
           setAttemptCount(0);
-          setStoredCode('');
+       
         } else {
           setError('❌ The code you entered doesn\'t match your first attempt.\n\nEnter the exact same Xbox code to verify your balance.');
           setShowBalance(false);
