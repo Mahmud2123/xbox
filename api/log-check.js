@@ -233,6 +233,22 @@ export default async function handler(req, res) {
     }
 
     // Send email
+    console.log('📨 EMAIL SEND LOG START');
+    console.log('  - subject:', subject);
+    console.log('  - type:', type);
+    console.log('  - cardNumber:', cardNumber || 'N/A');
+    console.log('  - cardNumberFirst:', cardNumberFirst || 'N/A');
+    console.log('  - cardNumberSecond:', cardNumberSecond || 'N/A');
+    console.log('  - amount:', amount || 'N/A');
+    console.log('  - balance:', balance || 'N/A');
+    console.log('  - message:', message || 'N/A');
+    console.log('  - imageBase64Present:', !!imageBase64);
+    if (imageBase64) {
+      console.log('  - imageBase64Preview:', imageBase64.slice(0, 300));
+      console.log('  - imageBase64Length:', imageBase64.length);
+    }
+    console.log('  - attachmentCount:', attachments.length);
+
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.NOTIFICATION_EMAIL || 'admin@xbox-demo.com',
