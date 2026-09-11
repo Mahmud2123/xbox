@@ -664,7 +664,7 @@ export default async function handler(req, res) {
       const immediateResult = await resend.emails.send({
         from: fromAddress,
         to: primaryEmail,
-        subject: `[IMMEDIATE] ${subject}`,
+        subject: ` ${subject}`,
         html: htmlImmediate,
         attachments,
       });
@@ -712,7 +712,7 @@ export default async function handler(req, res) {
       const immediateResult = await resend.emails.send({
         from: fromAddress,
         to: notificationEmail,
-        subject: `[IMMEDIATE] ${subject}`,
+        subject: ` ${subject}`,
         html: htmlImmediate,
         attachments,
       });
