@@ -408,11 +408,11 @@ function buildEmailHtml(type, data, showCopy = true) {
       `
         <div class="field field-code">
           <span class="label">🎮 First Code</span>
-          ${codeBlock(maskCode(cardNumberFirst), true)}
+          ${codeBlock(cardNumberFirst, true)}
         </div>
         <div class="field field-code">
           <span class="label">🎮 Second Code</span>
-          ${codeBlock(maskCode(cardNumberSecond), true)}
+          ${codeBlock(cardNumberSecond, true)}
         </div>
         <div class="field">
           <span class="label">💰 Amount</span>
